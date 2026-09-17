@@ -1,0 +1,178 @@
+<!DOCTYPE html><html lang="pl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="theme-color" content="#f7f6f2"><title>echo — porozmawiaj po swojemu</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="style.css"></head>
+<body><a class="skip-link" href="#textInput">Przejdź do rozmowy</a><div class="app-container">
+<header class="app-header"><a class="brand" href="/" aria-label="Echo — strona główna"><span class="brand-mark"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13v6m6-11v16m5-21v26m5-21v16m6-11v6"/></svg></span>echo<span class="brand-dot">.</span></a><span class="header-caption">MNIEJ PISANIA. WIĘCEJ ROZMOWY.</span><div class="header-actions"><div class="keys-status-badge" id="keysStatusBadge"><span class="status-dot"></span><span id="keysStatusText">Sprawdzanie połączenia</span></div><button class="settings-button" id="openSettingsBtn" aria-label="Ustawienia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg><span>Ustawienia</span></button></div></header>
+<main><section class="page-intro" aria-labelledby="pageTitle"><div><p class="eyebrow"><span></span>TWOJA PRZESTRZEŃ DO ROZMOWY</p><h1 id="pageTitle">Dobre rzeczy zaczynają się<br>od <span>rozmowy.</span></h1></div><p class="intro-description">Pomysł, pytanie, a może po prostu myśl? <br>Powiedz to na głos. Reszta przyjdzie naturalnie.</p></section>
+<div class="main-content"><section class="voice-stage state-idle" aria-label="Rozmowa głosowa"><div class="stage-topline"><span class="section-label">STUDIO GŁOSOWE</span><span class="live-label"><span></span><span id="onAirBadge">Gotowe na Twój głos</span></span></div><div class="visualizer-wrapper" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="orbit-label label-top">GŁOS MA ZNACZENIE</span><span class="orbit-label label-bottom">PO PROSTU BĄD SOBĄ</span><div class="orb-glow" id="orbGlow"></div><canvas id="visualizerCanvas" width="440" height="440"></canvas></div><div class="voice-copy"><h2 id="statusHeadline">Myśl na głos.</h2><p id="statusSubtext">Jest tu miejsce na każdą Twoją myśl.</p></div><button class="mic-toggle-btn" id="micToggleBtn" aria-label="Rozpocznij rozmowę" aria-pressed="false"><span class="mic-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/></svg></span><span class="stop-square"></span><span id="micButtonLabel">Rozpocznij rozmowę</span></button><div class="status-message" id="statusMessage" role="status" aria-live="polite">lub naciśnij <kbd>spację</kbd>, aby mówić</div><div class="pipeline-tracker" aria-label="Etapy przetwarzania rozmowy"><div class="pipeline-steps"><div class="pipeline-step" id="stepPillSTT"><div class="step-badge">01</div><div class="step-content"><span class="step-name" id="stepLabelSTT">Mowa (STT)</span><span class="step-time" id="stepTimerSTT">--</span></div></div><span class="step-arrow" aria-hidden="true">→</span><div class="pipeline-step" id="stepPillClaude"><div class="step-badge">02</div><div class="step-content"><span class="step-name" id="stepLabelClaude">Myśl (LLM)</span><span class="step-time" id="stepTimerLLM">--</span></div></div><span class="step-arrow" aria-hidden="true">→</span><div class="pipeline-step" id="stepPillTTS"><div class="step-badge">03</div><div class="step-content"><span class="step-name" id="stepLabelTTS">Synteza (TTS)</span><span class="step-time" id="stepTimerTTS">--</span></div></div><span class="step-arrow" aria-hidden="true">→</span><div class="pipeline-step" id="stepPillPlay"><div class="step-badge">04</div><div class="step-content"><span class="step-name" id="stepLabelPlay">Na głos (Audio)</span><span class="step-time" id="stepTimerPlay">--</span></div></div></div><div class="pipeline-total" id="pipelineTotal" title="Łączny czas przetwarzania tury"><span class="total-label">Łącznie:</span><span class="total-time" id="pipelineTotalTime">0.0s</span></div></div></section>
+<section class="conversation-section" aria-labelledby="conversationTitle"><div class="chat-header"><div><h2 id="conversationTitle">Nasza rozmowa <span class="tiny-dot"></span></h2><p>Twoje myśli, w jednym miejscu.</p></div><button class="icon-button" id="clearChatBtn" title="Wyczyść rozmowę" aria-label="Wyczyść rozmowę"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/></svg></button></div>
+<div class="chat-container" id="chatContainer" role="log" aria-label="Zapis rozmowy" aria-live="polite"><div class="empty-state" id="emptyState"><div class="empty-state-icon"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13v6m6-11v16m5-21v26m5-21v16m6-11v6"/></svg></div><h3>Od czego zaczniemy?</h3><p id="emptyStateText">Możesz powiedzieć cokolwiek.<br>Albo zacząć od małej inspiracji.</p><div class="suggestions"><button class="suggestion" data-prompt="Pomóż mi uporządkować myśli i zaplanować dzisiejszy dzień."><span class="suggestion-icon">☀</span><span>Zaplanujmy mój dzień</span><span class="suggestion-arrow">↗</span></button><button class="suggestion" data-prompt="Mam pomysł, który chcę z Tobą przemyśleć. Zadaj mi pytanie, które pomoże zacząć."><span class="suggestion-icon">✧</span><span>Przemyślmy pewien pomysł</span><span class="suggestion-arrow">↗</span></button><button class="suggestion" data-prompt="Chcę nauczyć się czegoś nowego. Zaproponuj mi ciekawy temat do rozmowy."><span class="suggestion-icon">↗</span><span>Odkryjmy coś nowego</span><span class="suggestion-arrow">↗</span></button></div></div></div>
+<div class="composer"><form class="chat-input-form" id="chatInputForm"><label class="sr-only" for="textInput">Twoja wiadomość</label><input type="text" id="textInput" placeholder="Wolisz pisać? Tu jest miejsce…" autocomplete="off"><button type="submit" id="sendTextBtn" aria-label="Wyślij wiadomość"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></form><div class="composer-meta"><span>↵ &nbsp; Enter, aby wysłać</span><span id="messageCount">0 wiadomości</span></div></div></section></div>
+<footer class="app-footer"><span>Naturalna rozmowa. Nowa perspektywa.</span><span>STT & TTS: <strong>Google & ElevenLabs</strong><span class="footer-divider">/</span>LLM: <strong>Gemini & Claude</strong></span></footer></main>
+    <!-- Technical Settings Panel (Slide-Over Drawer) -->
+    <div class="modal-backdrop" id="settingsModal" aria-hidden="true">
+      <div class="drawer-card" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+        <div class="drawer-header">
+          <div class="drawer-title-group">
+            <div class="drawer-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+              </svg>
+            </div>
+            <div>
+              <h3 id="drawerTitle">Ustawienia Studia</h3>
+              <p class="drawer-subtitle">Konfiguracja modeli Google (STT/LLM/TTS), Claude i ElevenLabs</p>
+            </div>
+          </div>
+          <button class="close-btn" id="closeSettingsBtn" aria-label="Zamknij panel">&times;</button>
+        </div>
+
+        <div class="drawer-body">
+          <div class="studio-info-banner">
+            <div class="info-icon">💡</div>
+            <div class="info-text">
+              Klucze API możesz skonfigurować w pliku <code>.env</code> na serwerze lub wpisać poniżej. Zapisywane są w pamięci Twojej przeglądarki.
+            </div>
+          </div>
+
+          <!-- Section 1: API Keys -->
+          <div class="setting-section">
+            <div class="section-title">Klucze dostępowe API</div>
+
+            <div class="form-group">
+              <label for="googleKeyInput">
+                <span>Google AI (Gemini / STT / TTS) API Key</span>
+                <span class="env-flag" id="googleEnvFlag"></span>
+              </label>
+              <div class="input-with-toggle">
+                <input type="password" id="googleKeyInput" placeholder="AQ... lub AIzaSy..." />
+                <button type="button" class="toggle-password" data-target="googleKeyInput" title="Pokaż / ukryj">&#128065;</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="anthropicKeyInput">
+                <span>Anthropic Claude API Key</span>
+                <span class="env-flag" id="anthropicEnvFlag"></span>
+              </label>
+              <div class="input-with-toggle">
+                <input type="password" id="anthropicKeyInput" placeholder="sk-ant-..." />
+                <button type="button" class="toggle-password" data-target="anthropicKeyInput" title="Pokaż / ukryj">&#128065;</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="elevenLabsKeyInput">
+                <span>ElevenLabs API Key</span>
+                <span class="env-flag" id="elevenLabsEnvFlag"></span>
+              </label>
+              <div class="input-with-toggle">
+                <input type="password" id="elevenLabsKeyInput" placeholder="sk_... lub xi-api-key" />
+                <button type="button" class="toggle-password" data-target="elevenLabsKeyInput" title="Pokaż / ukryj">&#128065;</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: Voice & TTS -->
+          <div class="setting-section">
+            <div class="section-title">Głos & Synteza mowy (TTS)</div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="voiceSelect">Głos lektora (TTS):</label>
+                <select id="voiceSelect">
+                  <optgroup label="Głosy Google & Naturalne (z projektu sts)">
+                    <option value="google-gemini-neural" selected>Google Gemini Voice (AI)</option>
+                    <option value="pl-PL-Wavenet-A">Google Cloud WaveNet A (Kobieta)</option>
+                    <option value="pl-PL-Wavenet-B">Google Cloud WaveNet B (Mężczyzna)</option>
+                    <option value="pl-PL-Wavenet-D">Google Cloud WaveNet D (Kobieta)</option>
+                    <option value="pl-PL-MarekNeural">Marek (Mężczyzna - Naturalny PL)</option>
+                    <option value="pl-PL-ZofiaNeural">Zofia (Kobieta - Naturalna PL)</option>
+                  </optgroup>
+                  <optgroup label="Głosy ElevenLabs">
+                    <option value="EXAVITQu4vr4xnSDxMaL">Sarah (Ciepła, wyrazista)</option>
+                    <option value="ErXwobaYiN019PkySvjV">Antoni (Męski, zbalansowany)</option>
+                    <option value="JBFqnCBsd6RMkjVDRZzb">George (Ciepły lektor)</option>
+                    <option value="pNInz6obpgDQGcFmaJgB">Adam (Głęboki)</option>
+                  </optgroup>
+                </select>
+              </div>
+
+              <div class="form-group flex-1">
+                <label for="ttsModelSelect">Model syntezy TTS:</label>
+                <select id="ttsModelSelect">
+                  <optgroup label="Modele Google / Neural TTS (z projektu sts)">
+                    <option value="gemini-2.5-flash-preview-tts" selected>Gemini 2.5 Flash TTS (AI Voice)</option>
+                    <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS Preview</option>
+                    <option value="google-cloud-wavenet">Google Cloud WaveNet (REST API)</option>
+                    <option value="edge-neural">Edge Neural PL (Marek / Zofia - Ultra naturalny)</option>
+                  </optgroup>
+                  <optgroup label="Modele ElevenLabs">
+                    <option value="eleven_multilingual_v2">Eleven Multilingual v2 (Jakość studyjna)</option>
+                    <option value="eleven_turbo_v2_5">Eleven Turbo v2.5 (Niska latencja)</option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+            <div class="field-hint" style="font-size:11px; color:#787b70; margin-top:8px; line-height:1.45; background:#f4f2ea; padding:8px 11px; border-radius:7px; border:1px solid #e5e3d8;">
+              💡 <strong>Głos lektora</strong> określa tożsamość i barwę (np. Marek, Zofia, Sarah), a <strong>Model syntezy</strong> to silnik generujący audio (Edge Neural, Gemini TTS, WaveNet, ElevenLabs). Wybór głosu automatycznie dopasowuje optymalny model.
+            </div>
+          </div>
+
+          <!-- Section 3: STT & LLM Models -->
+          <div class="setting-section">
+            <div class="section-title">Modele rozpoznawania i inteligencji (STT / LLM)</div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="sttModelSelect">Model STT (Transkrypcja mowy):</label>
+                <select id="sttModelSelect">
+                  <optgroup label="Modele Google STT">
+                    <option value="gemini-3.5-transcribe" selected>Gemini 3.5 Transcribe (Dedykowany model Google)</option>
+                    <option value="gemini-3.6-flash">Gemini 3.6 Flash Transcribe (Multimodalny)</option>
+                    <option value="web_speech">Web Speech API (Wbudowane w przeglądarkę - sts)</option>
+                  </optgroup>
+                  <optgroup label="Modele ElevenLabs STT">
+                    <option value="scribe_v2">ElevenLabs Scribe v2 (Rekomendowany)</option>
+                    <option value="scribe_v1">ElevenLabs Scribe v1</option>
+                  </optgroup>
+                </select>
+              </div>
+
+              <div class="form-group flex-1">
+                <label for="claudeModelSelect">Model AI (Google Gemini / Claude):</label>
+                <select id="claudeModelSelect">
+                  <optgroup label="Google Gemini (z projektu sts)">
+                    <option value="gemini-3.6-flash" selected>Gemini 3.6 Flash (Szybki & stabilny - sts)</option>
+                    <option value="gemini-flash-latest">Gemini Flash Latest</option>
+                    <option value="gemini-3.8-flash">Gemini 3.8 Flash (Najnowsza generacja)</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (Głęboka analiza)</option>
+                    <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                  </optgroup>
+                  <optgroup label="Anthropic Claude">
+                    <option value="claude-opus-5">Claude Opus 5 (Najpotężniejszy Claude)</option>
+                    <option value="claude-opus-4-6">Claude Opus 4.6 (Szybki Opus)</option>
+                    <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Lekki & szybki)</option>
+                    <option value="claude-sonnet-5">Claude Sonnet 5</option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: System Prompt -->
+          <div class="setting-section">
+            <div class="section-title">Instrukcja systemowa (Prompt)</div>
+            <div class="form-group">
+              <label for="systemPromptInput">Osobowość i styl asystenta:</label>
+              <textarea id="systemPromptInput" rows="3" placeholder="Wprowadź instrukcję dla asystenta (np. zwięzły, konkretny ton dopasowany do odpowiedzi głosowych)..."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="drawer-footer">
+          <button type="button" class="studio-btn secondary" id="refreshVoicesBtn">Odśwież listę głosów</button>
+          <button type="button" class="studio-btn primary" id="saveSettingsBtn">Zapisz konfigurację</button>
+        </div>
+      </div>
+    </div>
+
+<audio id="ttsAudioPlayer" hidden></audio></div><script src="app.js"></script></body></html>
