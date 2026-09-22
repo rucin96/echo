@@ -1,12 +1,336 @@
 <!DOCTYPE html><html lang="pl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="theme-color" content="#f7f6f2"><title>echo — porozmawiaj po swojemu</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="style.css"></head>
 <body><a class="skip-link" href="#textInput">Przejdź do rozmowy</a><div class="app-container">
-<header class="app-header"><a class="brand" href="/" aria-label="Echo — strona główna"><span class="brand-mark"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13v6m6-11v16m5-21v26m5-21v16m6-11v6"/></svg></span>echo<span class="brand-dot">.</span></a><span class="header-caption">MNIEJ PISANIA. WIĘCEJ ROZMOWY.</span><div class="header-actions"><div class="keys-status-badge" id="keysStatusBadge"><span class="status-dot"></span><span id="keysStatusText">Sprawdzanie połączenia</span></div><button class="settings-button" id="openSettingsBtn" aria-label="Ustawienia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg><span>Ustawienia</span></button></div></header>
-<main><section class="page-intro" aria-labelledby="pageTitle"><div><p class="eyebrow"><span></span>TWOJA PRZESTRZEŃ DO ROZMOWY</p><h1 id="pageTitle">Dobre rzeczy zaczynają się<br>od <span>rozmowy.</span></h1></div><p class="intro-description">Pomysł, pytanie, a może po prostu myśl? <br>Powiedz to na głos. Reszta przyjdzie naturalnie.</p></section>
-<div class="main-content"><section class="voice-stage state-idle" aria-label="Rozmowa głosowa"><div class="stage-topline"><span class="section-label">STUDIO GŁOSOWE</span><span class="live-label"><span></span><span id="onAirBadge">Gotowe na Twój głos</span></span></div><div class="visualizer-wrapper" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="orbit-label label-top">GŁOS MA ZNACZENIE</span><span class="orbit-label label-bottom">PO PROSTU BĄD SOBĄ</span><div class="orb-glow" id="orbGlow"></div><canvas id="visualizerCanvas" width="440" height="440"></canvas></div><div class="voice-copy"><h2 id="statusHeadline">Myśl na głos.</h2><p id="statusSubtext">Jest tu miejsce na każdą Twoją myśl.</p></div><button class="mic-toggle-btn" id="micToggleBtn" aria-label="Rozpocznij rozmowę" aria-pressed="false"><span class="mic-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/></svg></span><span class="stop-square"></span><span id="micButtonLabel">Rozpocznij rozmowę</span></button><div class="status-message" id="statusMessage" role="status" aria-live="polite">lub naciśnij <kbd>spację</kbd>, aby mówić</div><div class="pipeline-tracker" aria-label="Etapy przetwarzania rozmowy"><div class="pipeline-steps"><div class="pipeline-step" id="stepPillSTT"><div class="step-badge">01</div><div class="step-content"><span class="step-name" id="stepLabelSTT">Mowa (STT)</span><span class="step-time" id="stepTimerSTT">--</span></div></div><span class="step-arrow" aria-hidden="true">→</span><div class="pipeline-step" id="stepPillClaude"><div class="step-badge">02</div><div class="step-content"><span class="step-name" id="stepLabelClaude">Myśl (LLM)</span><span class="step-time" id="stepTimerLLM">--</span></div></div><span class="step-arrow" aria-hidden="true">→</span><div class="pipeline-step" id="stepPillTTS"><div class="step-badge">03</div><div class="step-content"><span class="step-name" id="stepLabelTTS">Synteza (TTS)</span><span class="step-time" id="stepTimerTTS">--</span></div></div><span class="step-arrow" aria-hidden="true">→</span><div class="pipeline-step" id="stepPillPlay"><div class="step-badge">04</div><div class="step-content"><span class="step-name" id="stepLabelPlay">Na głos (Audio)</span><span class="step-time" id="stepTimerPlay">--</span></div></div></div><div class="pipeline-total" id="pipelineTotal" title="Łączny czas przetwarzania tury"><span class="total-label">Łącznie:</span><span class="total-time" id="pipelineTotalTime">0.0s</span></div></div></section>
-<section class="conversation-section" aria-labelledby="conversationTitle"><div class="chat-header"><div><h2 id="conversationTitle">Nasza rozmowa <span class="tiny-dot"></span></h2><p>Twoje myśli, w jednym miejscu.</p></div><button class="icon-button" id="clearChatBtn" title="Wyczyść rozmowę" aria-label="Wyczyść rozmowę"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/></svg></button></div>
-<div class="chat-container" id="chatContainer" role="log" aria-label="Zapis rozmowy" aria-live="polite"><div class="empty-state" id="emptyState"><div class="empty-state-icon"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13v6m6-11v16m5-21v26m5-21v16m6-11v6"/></svg></div><h3>Od czego zaczniemy?</h3><p id="emptyStateText">Możesz powiedzieć cokolwiek.<br>Albo zacząć od małej inspiracji.</p><div class="suggestions"><button class="suggestion" data-prompt="Pomóż mi uporządkować myśli i zaplanować dzisiejszy dzień."><span class="suggestion-icon">☀</span><span>Zaplanujmy mój dzień</span><span class="suggestion-arrow">↗</span></button><button class="suggestion" data-prompt="Mam pomysł, który chcę z Tobą przemyśleć. Zadaj mi pytanie, które pomoże zacząć."><span class="suggestion-icon">✧</span><span>Przemyślmy pewien pomysł</span><span class="suggestion-arrow">↗</span></button><button class="suggestion" data-prompt="Chcę nauczyć się czegoś nowego. Zaproponuj mi ciekawy temat do rozmowy."><span class="suggestion-icon">↗</span><span>Odkryjmy coś nowego</span><span class="suggestion-arrow">↗</span></button></div></div></div>
-<div class="composer"><form class="chat-input-form" id="chatInputForm"><label class="sr-only" for="textInput">Twoja wiadomość</label><input type="text" id="textInput" placeholder="Wolisz pisać? Tu jest miejsce…" autocomplete="off"><button type="submit" id="sendTextBtn" aria-label="Wyślij wiadomość"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></form><div class="composer-meta"><span>↵ &nbsp; Enter, aby wysłać</span><span id="messageCount">0 wiadomości</span></div></div></section></div>
-<footer class="app-footer"><span>Naturalna rozmowa. Nowa perspektywa.</span><span>STT & TTS: <strong>Google & ElevenLabs</strong><span class="footer-divider">/</span>LLM: <strong>Gemini & Claude</strong></span></footer></main>
+<header class="app-header">
+  <div class="header-left">
+    <a class="brand" href="/" aria-label="Echo — strona główna" id="brandHomeLink">
+      <span class="brand-mark"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13v6m6-11v16m5-21v26m5-21v16m6-11v6"/></svg></span>echo<span class="brand-dot">.</span>
+    </a>
+    <span class="header-caption">MNIEJ PISANIA. WIĘCEJ ROZMOWY.</span>
+  </div>
+
+  <nav class="app-nav" aria-label="Nawigacja główna">
+    <button class="nav-tab active" id="navChatBtn" type="button" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Rozmowa</span>
+    </button>
+    <button class="nav-tab" id="navReaderBtn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      <span>Przeczytaj tekst</span>
+    </button>
+  </nav>
+
+  <div class="header-actions">
+    <div class="keys-status-badge" id="keysStatusBadge"><span class="status-dot"></span><span id="keysStatusText">Sprawdzanie połączenia</span></div>
+    <button class="settings-button" id="openSettingsBtn" aria-label="Ustawienia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg><span>Ustawienia</span></button>
+  </div>
+</header>
+<main>
+  <!-- Ekran 1: Rozmowa głosowa (Studio) -->
+  <div class="app-view active" id="viewChat">
+    <section class="page-intro" aria-labelledby="pageTitle">
+      <div>
+        <p class="eyebrow"><span></span>TWOJA PRZESTRZEŃ DO ROZMOWY</p>
+        <h1 id="pageTitle">Dobre rzeczy zaczynają się<br>od <span>rozmowy.</span></h1>
+      </div>
+      <p class="intro-description">Pomysł, pytanie, a może po prostu myśl? <br>Powiedz to na głos. Reszta przyjdzie naturalnie.</p>
+    </section>
+    <div class="main-content">
+      <section class="voice-stage state-idle" aria-label="Rozmowa głosowa">
+        <div class="stage-topline">
+          <span class="section-label">STUDIO GŁOSOWE</span>
+          <span class="live-label"><span></span><span id="onAirBadge">Gotowe na Twój głos</span></span>
+        </div>
+        <div class="visualizer-wrapper" aria-hidden="true">
+          <div class="orbit orbit-one"></div>
+          <div class="orbit orbit-two"></div>
+          <span class="orbit-label label-top">GŁOS MA ZNACZENIE</span>
+          <span class="orbit-label label-bottom">PO PROSTU BĄD SOBĄ</span>
+          <div class="orb-glow" id="orbGlow"></div>
+          <canvas id="visualizerCanvas" width="440" height="440"></canvas>
+        </div>
+        <div class="voice-copy">
+          <h2 id="statusHeadline">Myśl na głos.</h2>
+          <p id="statusSubtext">Jest tu miejsce na każdą Twoją myśl.</p>
+        </div>
+        <button class="mic-toggle-btn" id="micToggleBtn" aria-label="Rozpocznij rozmowę" aria-pressed="false">
+          <span class="mic-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/></svg></span>
+          <span class="stop-square"></span>
+          <span id="micButtonLabel">Rozpocznij rozmowę</span>
+        </button>
+        <div class="status-message" id="statusMessage" role="status" aria-live="polite">lub naciśnij <kbd>spację</kbd>, aby mówić</div>
+        <div class="pipeline-tracker" aria-label="Etapy przetwarzania rozmowy">
+          <div class="pipeline-steps">
+            <div class="pipeline-step" id="stepPillSTT"><div class="step-badge">01</div><div class="step-content"><span class="step-name" id="stepLabelSTT">Mowa (STT)</span><span class="step-time" id="stepTimerSTT">--</span></div></div>
+            <span class="step-arrow" aria-hidden="true">→</span>
+            <div class="pipeline-step" id="stepPillClaude"><div class="step-badge">02</div><div class="step-content"><span class="step-name" id="stepLabelClaude">Myśl (LLM)</span><span class="step-time" id="stepTimerLLM">--</span></div></div>
+            <span class="step-arrow" aria-hidden="true">→</span>
+            <div class="pipeline-step" id="stepPillTTS"><div class="step-badge">03</div><div class="step-content"><span class="step-name" id="stepLabelTTS">Synteza (TTS)</span><span class="step-time" id="stepTimerTTS">--</span></div></div>
+            <span class="step-arrow" aria-hidden="true">→</span>
+            <div class="pipeline-step" id="stepPillPlay"><div class="step-badge">04</div><div class="step-content"><span class="step-name" id="stepLabelPlay">Na głos (Audio)</span><span class="step-time" id="stepTimerPlay">--</span></div></div>
+          </div>
+          <div class="pipeline-total" id="pipelineTotal" title="Łączny czas przetwarzania tury"><span class="total-label">Łącznie:</span><span class="total-time" id="pipelineTotalTime">0.0s</span></div>
+        </div>
+      </section>
+      <section class="conversation-section" aria-labelledby="conversationTitle">
+        <div class="chat-header">
+          <div><h2 id="conversationTitle">Nasza rozmowa <span class="tiny-dot"></span></h2><p>Twoje myśli, w jednym miejscu.</p></div>
+          <button class="icon-button" id="clearChatBtn" title="Wyczyść rozmowę" aria-label="Wyczyść rozmowę"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/></svg></button>
+        </div>
+        <div class="chat-container" id="chatContainer" role="log" aria-label="Zapis rozmowy" aria-live="polite">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-state-icon"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13v6m6-11v16m5-21v26m5-21v16m6-11v6"/></svg></div>
+            <h3>Od czego zaczniemy?</h3>
+            <p id="emptyStateText">Możesz powiedzieć cokolwiek.<br>Albo zacząć od małej inspiracji.</p>
+            <div class="suggestions">
+              <button class="suggestion" data-prompt="Pomóż mi uporządkować myśli i zaplanować dzisiejszy dzień."><span class="suggestion-icon">☀</span><span>Zaplanujmy mój dzień</span><span class="suggestion-arrow">↗</span></button>
+              <button class="suggestion" data-prompt="Mam pomysł, który chcę z Tobą przemyśleć. Zadaj mi pytanie, które pomoże zacząć."><span class="suggestion-icon">✧</span><span>Przemyślmy pewien pomysł</span><span class="suggestion-arrow">↗</span></button>
+              <button class="suggestion" data-prompt="Chcę nauczyć się czegoś nowego. Zaproponuj mi ciekawy temat do rozmowy."><span class="suggestion-icon">↗</span><span>Odkryjmy coś nowego</span><span class="suggestion-arrow">↗</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="composer">
+          <form class="chat-input-form" id="chatInputForm">
+            <label class="sr-only" for="textInput">Twoja wiadomość</label>
+            <input type="text" id="textInput" placeholder="Wolisz pisać? Tu jest miejsce…" autocomplete="off">
+            <button type="submit" id="sendTextBtn" aria-label="Wyślij wiadomość"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
+          </form>
+          <div class="composer-meta"><span>↵ &nbsp; Enter, aby wysłać</span><span id="messageCount">0 wiadomości</span></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Ekran 2: Przeczytaj tekst (Lektor) -->
+  <div class="app-view" id="viewReader" hidden>
+    <section class="page-intro reader-intro" aria-labelledby="readerPageTitle">
+      <div>
+        <div class="reader-back-nav">
+          <button type="button" class="back-link-btn" id="readerBackBtn" title="Wróć do studia rozmowy">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            <span>Wróć do rozmowy</span>
+          </button>
+        </div>
+        <p class="eyebrow"><span></span>STUDIO LEKTORSKIE</p>
+        <h1 id="readerPageTitle">Przeczytaj tekst <span>na głos.</span></h1>
+      </div>
+      <div class="reader-intro-right">
+        <p class="intro-description">Wklej dowolny tekst — artykuł, notatkę lub dokument.<br>Silnik głosowy odczyta go z naturalną intonacją na podstawie Twoich ustawień.</p>
+        <div class="reader-system-pill" id="readerSystemPill">
+          <div class="pill-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line><line x1="8" y1="22" x2="16" y2="22"></line></svg>
+            <span>Ustawienia głosu:</span>
+          </div>
+          <div class="pill-details">
+            <strong id="readerPillVoiceName">Marek (Naturalny PL)</strong>
+            <span class="pill-divider">•</span>
+            <span id="readerPillModelName">Edge Neural</span>
+          </div>
+          <button type="button" class="pill-action-btn" id="readerEditSettingsBtn" title="Zmień głos lub silnik w Ustawieniach">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>
+            <span>Zmień</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div class="reader-content-grid">
+      <!-- Edytor tekstu -->
+      <section class="reader-card reader-editor-section" aria-labelledby="editorHeading">
+        <div class="reader-card-header">
+          <div class="card-title-group">
+            <span class="section-label">TREŚĆ DO PRZECZYTANIA</span>
+            <h2 id="editorHeading">Wklej tekst do przeczytania</h2>
+          </div>
+          <div class="editor-actions">
+            <button type="button" class="reader-tool-btn" id="readerPasteBtn" title="Wklej tekst ze schowka">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              <span>Wklej ze schowka</span>
+            </button>
+            <button type="button" class="reader-tool-btn" id="readerSampleBtn" title="Wstaw przykładowy tekst">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+              <span>Przykładowy tekst</span>
+            </button>
+            <button type="button" class="reader-tool-btn danger" id="readerClearBtn" title="Wyczyść tekst">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              <span>Wyczyść</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="editor-body">
+          <textarea id="readerTextInput" class="reader-textarea" rows="11" placeholder="Wklej lub wpisz tutaj tekst, artykuł, fragment książki lub notatki... Lektor przeczyta go z naturalną intonacją na podstawie wybranych ustawień systemowych."></textarea>
+        </div>
+
+        <div class="editor-footer">
+          <div class="reader-stats">
+            <span class="stat-pill" id="readerCharCount">0 znaków</span>
+            <span class="stat-pill" id="readerWordCount">0 słów</span>
+            <span class="stat-pill" id="readerEstimatedTime">Czas czytania: ~0s</span>
+          </div>
+          <div class="editor-submit-row">
+            <div class="reader-status" id="readerStatusText">Wklej tekst i kliknij „Generuj nagranie lektora”.</div>
+            <button type="button" class="reader-submit-btn" id="readerSynthesizeBtn">
+              <span class="btn-spinner" id="readerSpinner" hidden></span>
+              <svg class="btn-icon" id="readerBtnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              </svg>
+              <span id="readerSubmitBtnText">Generuj nagranie lektora</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Odtwarzacz lektora -->
+      <section class="reader-card reader-player-section" aria-labelledby="playerHeading">
+        <div class="reader-card-header">
+          <div class="card-title-group">
+            <span class="section-label">STUDIO ODSŁUCHU</span>
+            <h2 id="playerHeading">Odtwarzacz lektora</h2>
+          </div>
+          <div class="player-live-badge" id="playerStateBadge">
+            <span class="pulse-dot"></span>
+            <span id="playerStateText">Czeka na tekst</span>
+          </div>
+        </div>
+
+        <!-- Stan pusty (przed generowaniem) -->
+        <div class="reader-player-empty" id="readerPlayerEmpty">
+          <div class="empty-icon-circle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+          </div>
+          <h3>Brak przygotowanego nagrania</h3>
+          <p>Wklej dowolny fragment tekstu w panelu obok i uruchom generowanie.<br>Otrzymasz pełny odtwarzacz z możliwością <strong>odtwarzania</strong>, robienia <strong>pauzy</strong> oraz <strong>cofania i przewijania o 5 sekund</strong>.</p>
+        </div>
+
+        <!-- Aktywny odtwarzacz -->
+        <div class="reader-player-active" id="readerPlayerActive" hidden>
+          <div class="track-meta-banner">
+            <div class="track-info">
+              <h3 class="track-title" id="readerTrackTitle">Nagranie tekstu</h3>
+              <p class="track-voice" id="readerTrackMeta">Głos: Marek • Czas syntezy: --</p>
+            </div>
+            <a class="download-pill" id="readerDownloadLink" download="nagranie-lektora.mp3" title="Pobierz plik audio nagrania">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span>Pobierz MP3</span>
+            </a>
+          </div>
+
+          <!-- Animowana fala dźwiękowa -->
+          <div class="waveform-container" id="readerWaveform" aria-hidden="true">
+            <div class="waveform-bars" id="waveformBars"></div>
+          </div>
+
+          <!-- Pasek postępu (Scrubber) -->
+          <div class="scrubber-wrapper">
+            <span class="time-display current-time" id="readerCurrentTime">00:00</span>
+            <div class="scrubber-track" id="readerScrubberTrack" role="slider" aria-label="Pozycja odtwarzania" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+              <div class="scrubber-fill" id="readerScrubberFill"></div>
+              <div class="scrubber-thumb" id="readerScrubberThumb"></div>
+            </div>
+            <span class="time-display total-time" id="readerTotalTime">00:00</span>
+          </div>
+
+          <!-- Główne kontrolki odtwarzacza -->
+          <div class="player-main-controls">
+            <!-- Cofnij o 5 sekund -->
+            <button type="button" class="ctrl-btn seek-btn" id="readerRewindBtn" title="Cofnij o 5 sekund (Skrót: Strzałka w lewo)" aria-label="Cofnij o 5 sekund">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 4v6h6"></path>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+              </svg>
+              <span class="seek-label">-5s</span>
+            </button>
+
+            <!-- Odtwórz / Pauza -->
+            <button type="button" class="ctrl-btn play-pause-btn" id="readerPlayPauseBtn" title="Odtwórz / Wstrzymaj (Skrót: Spacja)" aria-label="Odtwórz">
+              <svg class="icon-play" id="readerPlayIcon" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="6 4 20 12 6 20 6 4"></polygon>
+              </svg>
+              <svg class="icon-pause" id="readerPauseIcon" viewBox="0 0 24 24" fill="currentColor" hidden>
+                <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+                <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+              </svg>
+            </button>
+
+            <!-- Przewiń do przodu o 5 sekund -->
+            <button type="button" class="ctrl-btn seek-btn" id="readerForwardBtn" title="Przewiń do przodu o 5 sekund (Skrót: Strzałka w prawo)" aria-label="Przewiń do przodu o 5 sekund">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6"></path>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+              <span class="seek-label">+5s</span>
+            </button>
+
+            <!-- Zatrzymaj / Reset -->
+            <button type="button" class="ctrl-btn stop-btn" id="readerStopBtn" title="Zatrzymaj i wróć do początku" aria-label="Zatrzymaj">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="1.5"></rect>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Narzędzia dolne -->
+          <div class="player-footer-tools">
+            <div class="speed-control">
+              <label for="readerSpeedSelect">Tempo:</label>
+              <select id="readerSpeedSelect">
+                <option value="0.75">0.75x</option>
+                <option value="1" selected>1.0x</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2.0x</option>
+              </select>
+            </div>
+
+            <div class="player-hotkeys">
+              <span class="hotkey"><kbd>Spacja</kbd> Play / Pauza</span>
+              <span class="hotkey"><kbd>←</kbd> -5s</span>
+              <span class="hotkey"><kbd>→</kbd> +5s</span>
+            </div>
+          </div>
+
+          <!-- Dedykowany element audio dla czytnika -->
+          <audio id="readerAudioElement" preload="metadata"></audio>
+        </div>
+      </section>
+    </div>
+
+    <!-- Sekcja: Historia ostatnich 10 nagrań w ramach sesji -->
+    <section class="reader-card reader-history-section" id="readerHistorySection" aria-labelledby="historyHeading">
+      <div class="reader-card-header">
+        <div class="card-title-group">
+          <span class="section-label">PAMIĘĆ SESJI</span>
+          <h2 id="historyHeading">Ostatnie nagrania <span class="history-counter-pill" id="historyCounterPill">0 / 10</span></h2>
+        </div>
+        <div class="history-header-actions">
+          <button type="button" class="reader-tool-btn danger" id="readerClearHistoryBtn" title="Wyczyść nagrania z tej sesji">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            <span>Wyczyść historię</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="history-body">
+        <div class="history-empty" id="historyEmpty">
+          <div class="history-empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </div>
+          <div class="history-empty-content">
+            <h3>Brak nagrań w bieżącej sesji</h3>
+            <p>Każde wygenerowane nagranie lektora (do <strong>10 ostatnich</strong>) pojawi się na tej liście.<br>Możesz natychmiast je odsłuchać, pobrać plik MP3 lub wczytać tekst z powrotem do edytora.</p>
+          </div>
+        </div>
+        <div class="history-list" id="historyList" hidden></div>
+      </div>
+    </section>
+  </div>
+
+  <footer class="app-footer">
+    <span>Naturalna rozmowa. Nowa perspektywa.</span>
+    <span>STT & TTS: <strong>Google & ElevenLabs</strong><span class="footer-divider">/</span>LLM: <strong>Gemini & Claude</strong></span>
+  </footer>
+</main>
     <!-- Technical Settings Panel (Slide-Over Drawer) -->
     <div class="modal-backdrop" id="settingsModal" aria-hidden="true">
       <div class="drawer-card" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
@@ -107,6 +431,7 @@
                   </optgroup>
                   <optgroup label="Modele ElevenLabs">
                     <option value="eleven_multilingual_v2">Eleven Multilingual v2 (Jakość studyjna)</option>
+                    <option value="eleven_flash_v2_5">Eleven Flash v2.5 (Błyskawiczny & naturalny)</option>
                     <option value="eleven_turbo_v2_5">Eleven Turbo v2.5 (Niska latencja)</option>
                   </optgroup>
                 </select>

@@ -19,9 +19,23 @@ if (!initialVoiceId || initialVoiceId === '21m00Tcm4TlvDq8ikWAM') {
 let initialSttModel = localStorage.getItem('stt_model') || 'gemini-3.5-transcribe';
 let initialTtsModel = localStorage.getItem('tts_model') || 'gemini-2.5-flash-preview-tts';
 
+// Auto-reconciliation if ElevenLabs voice was chosen with non-ElevenLabs model or vice versa
+const isElevenInitVoice = initialVoiceId && !initialVoiceId.startsWith('google-') && !initialVoiceId.startsWith('pl-PL-');
+if (isElevenInitVoice && !initialTtsModel.startsWith('eleven_')) {
+  initialTtsModel = 'eleven_multilingual_v2';
+  localStorage.setItem('tts_model', initialTtsModel);
+} else if (initialTtsModel.startsWith('eleven_') && (initialVoiceId.startsWith('google-') || initialVoiceId.startsWith('pl-PL-'))) {
+  initialVoiceId = 'EXAVITQu4vr4xnSDxMaL';
+  localStorage.setItem('voice_id', initialVoiceId);
+}
+
+const MAX_READER_HISTORY = 10;
+
 const state = {
   status: 'idle', // 'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking'
   messages: [],
+  readerHistory: [], // Lista do 10 ostatnich nagrań w bieżącej sesji
+  activeHistoryId: null,
   keys: {
     elevenLabs: localStorage.getItem('elevenlabs_api_key') || '',
     anthropic: localStorage.getItem('anthropic_api_key') || '',
@@ -56,6 +70,60 @@ const clearChatBtn = document.getElementById('clearChatBtn');
 const keysStatusBadge = document.getElementById('keysStatusBadge');
 const keysStatusText = document.getElementById('keysStatusText');
 const ttsAudioPlayer = document.getElementById('ttsAudioPlayer');
+
+// Reader View Elements
+const navChatBtn = document.getElementById('navChatBtn');
+const navReaderBtn = document.getElementById('navReaderBtn');
+const viewChat = document.getElementById('viewChat');
+const viewReader = document.getElementById('viewReader');
+const brandHomeLink = document.getElementById('brandHomeLink');
+const readerBackBtn = document.getElementById('readerBackBtn');
+const readerEditSettingsBtn = document.getElementById('readerEditSettingsBtn');
+const readerPillVoiceName = document.getElementById('readerPillVoiceName');
+const readerPillModelName = document.getElementById('readerPillModelName');
+
+const readerTextInput = document.getElementById('readerTextInput');
+const readerPasteBtn = document.getElementById('readerPasteBtn');
+const readerSampleBtn = document.getElementById('readerSampleBtn');
+const readerClearBtn = document.getElementById('readerClearBtn');
+const readerCharCount = document.getElementById('readerCharCount');
+const readerWordCount = document.getElementById('readerWordCount');
+const readerEstimatedTime = document.getElementById('readerEstimatedTime');
+const readerSynthesizeBtn = document.getElementById('readerSynthesizeBtn');
+const readerSubmitBtnText = document.getElementById('readerSubmitBtnText');
+const readerSpinner = document.getElementById('readerSpinner');
+const readerBtnIcon = document.getElementById('readerBtnIcon');
+const readerStatusText = document.getElementById('readerStatusText');
+
+const readerPlayerEmpty = document.getElementById('readerPlayerEmpty');
+const readerPlayerActive = document.getElementById('readerPlayerActive');
+const playerStateBadge = document.getElementById('playerStateBadge');
+const playerStateText = document.getElementById('playerStateText');
+const readerTrackTitle = document.getElementById('readerTrackTitle');
+const readerTrackMeta = document.getElementById('readerTrackMeta');
+const readerDownloadLink = document.getElementById('readerDownloadLink');
+const readerWaveform = document.getElementById('readerWaveform');
+const waveformBars = document.getElementById('waveformBars');
+const readerScrubberTrack = document.getElementById('readerScrubberTrack');
+const readerScrubberFill = document.getElementById('readerScrubberFill');
+const readerScrubberThumb = document.getElementById('readerScrubberThumb');
+const readerCurrentTime = document.getElementById('readerCurrentTime');
+const readerTotalTime = document.getElementById('readerTotalTime');
+const readerPlayPauseBtn = document.getElementById('readerPlayPauseBtn');
+const readerPlayIcon = document.getElementById('readerPlayIcon');
+const readerPauseIcon = document.getElementById('readerPauseIcon');
+const readerRewindBtn = document.getElementById('readerRewindBtn');
+const readerForwardBtn = document.getElementById('readerForwardBtn');
+const readerStopBtn = document.getElementById('readerStopBtn');
+const readerSpeedSelect = document.getElementById('readerSpeedSelect');
+const readerAudioElement = document.getElementById('readerAudioElement');
+
+// Reader Session History Elements
+const readerHistorySection = document.getElementById('readerHistorySection');
+const historyCounterPill = document.getElementById('historyCounterPill');
+const readerClearHistoryBtn = document.getElementById('readerClearHistoryBtn');
+const historyEmpty = document.getElementById('historyEmpty');
+const historyList = document.getElementById('historyList');
 
 // Dynamic Labels
 const headerSubtitle = document.getElementById('headerSubtitle');
@@ -318,10 +386,51 @@ function getTtsModelName(modelId) {
     'gemini-3.1-flash-tts-preview': 'Gemini 3.1 Flash TTS',
     'google-cloud-wavenet': 'Google WaveNet',
     'edge-neural': 'Edge Neural',
+    'eleven_flash_v2_5': 'Eleven Flash v2.5',
     'eleven_turbo_v2_5': 'Turbo v2.5',
     'eleven_multilingual_v2': 'Multilingual v2'
   };
   return map[modelId] || modelId || 'TTS';
+}
+
+// Auto-synchronize Voice and TTS Model (solves UX distinction between voice timbre and AI engine)
+function syncVoiceAndTtsModel(source) {
+  if (!voiceSelect || !ttsModelSelect) return;
+  const currentVoice = voiceSelect.value;
+  const currentTts = ttsModelSelect.value;
+
+  if (source === 'voice') {
+    if (currentVoice.startsWith('google-gemini')) {
+      ttsModelSelect.value = 'gemini-2.5-flash-preview-tts';
+    } else if (currentVoice.startsWith('pl-PL-Wavenet')) {
+      ttsModelSelect.value = 'google-cloud-wavenet';
+    } else if (currentVoice === 'pl-PL-MarekNeural' || currentVoice === 'pl-PL-ZofiaNeural') {
+      ttsModelSelect.value = 'edge-neural';
+    } else if (currentVoice && (!currentVoice.startsWith('google-') && !currentVoice.startsWith('pl-PL-'))) {
+      // ElevenLabs voice ID
+      if (!currentTts.startsWith('eleven_')) {
+        ttsModelSelect.value = 'eleven_multilingual_v2';
+      }
+    }
+  } else if (source === 'model') {
+    if (currentTts.includes('gemini')) {
+      if (!currentVoice.startsWith('google-gemini')) {
+        voiceSelect.value = 'google-gemini-neural';
+      }
+    } else if (currentTts === 'google-cloud-wavenet') {
+      if (!currentVoice.startsWith('pl-PL-Wavenet')) {
+        voiceSelect.value = 'pl-PL-Wavenet-A';
+      }
+    } else if (currentTts === 'edge-neural') {
+      if (currentVoice !== 'pl-PL-MarekNeural' && currentVoice !== 'pl-PL-ZofiaNeural') {
+        voiceSelect.value = 'pl-PL-MarekNeural';
+      }
+    } else if (currentTts.startsWith('eleven_')) {
+      if (currentVoice.startsWith('google-') || currentVoice.startsWith('pl-PL-')) {
+        voiceSelect.value = 'EXAVITQu4vr4xnSDxMaL'; // Sarah
+      }
+    }
+  }
 }
 
 // Update UI labels across header, pipeline, and deck to match current settings
@@ -352,6 +461,9 @@ function updateDynamicLabels() {
       <strong>${sttName}</strong> dokona transkrypcji, <strong>${modelName}</strong> sformułuje odpowiedź, 
       a syntezator odczyta ją głosem <strong>${voiceName}</strong>.`;
   }
+
+  // 5. Reader Screen System Pill
+  updateReaderSystemPill();
 }
 
 // ==========================================
@@ -360,6 +472,7 @@ function updateDynamicLabels() {
 async function init() {
   setupCanvas();
   loadSavedSettings();
+  initReaderModule();
   updateDynamicLabels();
   setupEventListeners();
   startVisualizerLoop();
@@ -512,8 +625,12 @@ async function loadVoices() {
         voiceSelect.value = currentVal;
       } else if (voiceSelect.options.length > 0) {
         voiceSelect.selectedIndex = 0;
-        state.settings.voiceId = voiceSelect.value;
       }
+      syncVoiceAndTtsModel('voice');
+      state.settings.voiceId = voiceSelect.value;
+      state.settings.ttsModel = ttsModelSelect.value;
+      localStorage.setItem('voice_id', state.settings.voiceId);
+      localStorage.setItem('tts_model', state.settings.ttsModel);
       updateDynamicLabels();
     }
   } catch (err) {
@@ -587,14 +704,38 @@ function setupEventListeners() {
   // Mic Button Toggle
   micToggleBtn.addEventListener('click', toggleRecording);
 
-  // Keyboard shortcut: Spacebar to toggle record (when not typing in an input)
+  // Keyboard shortcuts: Spacebar, Arrows, Escape
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && !e.repeat && !settingsModal.classList.contains('open') && !document.activeElement.closest('input, textarea, select, button, a, [contenteditable]')) {
+    if (settingsModal && settingsModal.classList.contains('open')) {
+      if (e.key === 'Escape') {
+        closeSettingsPanel();
+      }
+      return;
+    }
+
+    const isTyping = Boolean(document.activeElement && document.activeElement.closest('input, textarea, [contenteditable]'));
+
+    // Reader Screen Shortcuts
+    if (currentView === 'reader') {
+      if (!isTyping) {
+        if (e.code === 'Space' && !e.repeat) {
+          e.preventDefault();
+          toggleReaderPlayPause();
+        } else if (e.code === 'ArrowLeft') {
+          e.preventDefault();
+          seekReader(-5);
+        } else if (e.code === 'ArrowRight') {
+          e.preventDefault();
+          seekReader(5);
+        }
+      }
+      return;
+    }
+
+    // Chat Screen Shortcuts: Spacebar to toggle record
+    if (e.code === 'Space' && !e.repeat && !document.activeElement.closest('input, textarea, select, button, a, [contenteditable]')) {
       e.preventDefault();
       toggleRecording();
-    }
-    if (e.key === 'Escape' && settingsModal.classList.contains('open')) {
-      closeSettingsPanel();
     }
   });
 
@@ -646,6 +787,7 @@ function setupEventListeners() {
   });
 
   saveSettingsBtn.addEventListener('click', () => {
+    syncVoiceAndTtsModel('voice');
     state.keys.elevenLabs = elevenLabsKeyInput.value.trim();
     state.keys.anthropic = anthropicKeyInput.value.trim();
     state.keys.google = googleKeyInput ? googleKeyInput.value.trim() : '';
@@ -677,44 +819,6 @@ function setupEventListeners() {
     await Promise.all([loadVoices(), loadClaudeModels()]);
     refreshVoicesBtn.textContent = 'Odśwież listę głosów';
   });
-
-  // Auto-synchronize Voice and TTS Model (solves UX distinction between voice timbre and AI engine)
-  function syncVoiceAndTtsModel(source) {
-    const currentVoice = voiceSelect.value;
-    const currentTts = ttsModelSelect.value;
-
-    if (source === 'voice') {
-      if (currentVoice.startsWith('google-gemini')) {
-        ttsModelSelect.value = 'gemini-2.5-flash-preview-tts';
-      } else if (currentVoice.startsWith('pl-PL-Wavenet')) {
-        ttsModelSelect.value = 'google-cloud-wavenet';
-      } else if (currentVoice === 'pl-PL-MarekNeural' || currentVoice === 'pl-PL-ZofiaNeural') {
-        ttsModelSelect.value = 'edge-neural';
-      } else if (currentVoice.length > 15) { // ElevenLabs voice ID
-        if (!currentTts.startsWith('eleven_')) {
-          ttsModelSelect.value = 'eleven_multilingual_v2';
-        }
-      }
-    } else if (source === 'model') {
-      if (currentTts.includes('gemini')) {
-        if (!currentVoice.startsWith('google-gemini')) {
-          voiceSelect.value = 'google-gemini-neural';
-        }
-      } else if (currentTts === 'google-cloud-wavenet') {
-        if (!currentVoice.startsWith('pl-PL-Wavenet')) {
-          voiceSelect.value = 'pl-PL-Wavenet-A';
-        }
-      } else if (currentTts === 'edge-neural') {
-        if (currentVoice !== 'pl-PL-MarekNeural' && currentVoice !== 'pl-PL-ZofiaNeural') {
-          voiceSelect.value = 'pl-PL-MarekNeural';
-        }
-      } else if (currentTts.startsWith('eleven_')) {
-        if (currentVoice.startsWith('google-') || currentVoice.startsWith('pl-PL-')) {
-          voiceSelect.value = 'EXAVITQu4vr4xnSDxMaL'; // Sarah
-        }
-      }
-    }
-  }
 
   voiceSelect.addEventListener('change', () => {
     syncVoiceAndTtsModel('voice');
@@ -1124,13 +1228,23 @@ async function handleConversationTurn() {
     if (state.keys.elevenLabs) ttsHeaders['x-elevenlabs-key'] = state.keys.elevenLabs;
     if (state.keys.google) ttsHeaders['x-google-key'] = state.keys.google;
 
+    // Upewnij się, że model TTS odpowiada wybranemu głosowi
+    let effectiveTtsModel = state.settings.ttsModel;
+    const isElevenVoice = state.settings.voiceId && !state.settings.voiceId.startsWith('google-') && !state.settings.voiceId.startsWith('pl-PL-');
+    if (isElevenVoice && !effectiveTtsModel.startsWith('eleven_')) {
+      effectiveTtsModel = 'eleven_multilingual_v2';
+      state.settings.ttsModel = effectiveTtsModel;
+      localStorage.setItem('tts_model', effectiveTtsModel);
+      if (ttsModelSelect) ttsModelSelect.value = effectiveTtsModel;
+    }
+
     const ttsRes = await fetch('/api/tts', {
       method: 'POST',
       headers: ttsHeaders,
       body: JSON.stringify({
         text: aiText,
         voiceId: state.settings.voiceId,
-        modelId: state.settings.ttsModel
+        modelId: effectiveTtsModel
       })
     });
 
@@ -1418,6 +1532,759 @@ function startVisualizerLoop() {
     ctx.restore();
   }
   draw();
+}
+
+// ==========================================================================
+// Przeczytaj Tekst (Reader Screen) Controller
+// ==========================================================================
+let currentView = 'chat'; // 'chat' | 'reader'
+let currentReaderAudioUrl = null;
+
+const SAMPLE_TEXT = `Sztuczna inteligencja rozwija się w zawrotnym tempie, a technologie syntezy głosu pozwalają dziś na tworzenie niezwykle naturalnych, ekspresyjnych wypowiedzi. Możesz wkleić tutaj dowolny artykuł, rozdział książki lub osobiste notatki. Wygodny odtwarzacz pozwala Ci swobodnie odtwarzać, pauzować oraz cofać i przewijać nagranie o 5 sekund, aby nie umknął Ci żaden szczegół. Miłego słuchania!`;
+
+function switchView(target) {
+  if (target === 'reader') {
+    currentView = 'reader';
+    if (viewChat) viewChat.hidden = true;
+    if (viewReader) viewReader.hidden = false;
+    if (navChatBtn) {
+      navChatBtn.classList.remove('active');
+      navChatBtn.removeAttribute('aria-current');
+    }
+    if (navReaderBtn) {
+      navReaderBtn.classList.add('active');
+      navReaderBtn.setAttribute('aria-current', 'page');
+    }
+    updateReaderSystemPill();
+    window.location.hash = '#tekst';
+  } else {
+    currentView = 'chat';
+    if (viewChat) viewChat.hidden = false;
+    if (viewReader) viewReader.hidden = true;
+    if (navChatBtn) {
+      navChatBtn.classList.add('active');
+      navChatBtn.setAttribute('aria-current', 'page');
+    }
+    if (navReaderBtn) {
+      navReaderBtn.classList.remove('active');
+      navReaderBtn.removeAttribute('aria-current');
+    }
+    if (readerAudioElement && !readerAudioElement.paused) {
+      readerAudioElement.pause();
+    }
+    if (window.location.hash === '#tekst' || window.location.hash === '#przeczytaj-tekst') {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }
+}
+
+function updateReaderSystemPill() {
+  if (readerPillVoiceName) {
+    readerPillVoiceName.textContent = getVoiceName(state.settings.voiceId);
+  }
+  if (readerPillModelName) {
+    readerPillModelName.textContent = getTtsModelName(state.settings.ttsModel);
+  }
+}
+
+function updateReaderStats() {
+  if (!readerTextInput) return;
+  const text = readerTextInput.value;
+  const charCount = text.length;
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+
+  if (readerCharCount) readerCharCount.textContent = `${charCount.toLocaleString('pl-PL')} znaków`;
+  if (readerWordCount) readerWordCount.textContent = `${words.toLocaleString('pl-PL')} słów`;
+
+  if (readerEstimatedTime) {
+    if (words === 0) {
+      readerEstimatedTime.textContent = 'Czas czytania: ~0s';
+    } else {
+      const totalSec = Math.round((words / 130) * 60);
+      if (totalSec < 60) {
+        readerEstimatedTime.textContent = `Czas czytania: ~${totalSec}s`;
+      } else {
+        const mins = Math.floor(totalSec / 60);
+        const remSec = totalSec % 60;
+        readerEstimatedTime.textContent = `Czas czytania: ~${mins}m ${remSec > 0 ? remSec + 's' : ''}`;
+      }
+    }
+  }
+}
+
+function initWaveformBars() {
+  if (!waveformBars) return;
+  waveformBars.innerHTML = '';
+  const barCount = 38;
+  for (let i = 0; i < barCount; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'waveform-bar';
+    const h = 6 + Math.sin(i / 2.3) * 16 + ((i * 7) % 18);
+    bar.style.height = `${Math.max(6, Math.min(46, Math.round(h)))}px`;
+    bar.style.animationDelay = `${(i * 0.04).toFixed(2)}s`;
+    waveformBars.appendChild(bar);
+  }
+}
+
+function formatReaderTime(seconds) {
+  if (!seconds || isNaN(seconds)) return '00:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
+function updateReaderProgress(current, duration) {
+  if (readerCurrentTime) readerCurrentTime.textContent = formatReaderTime(current);
+  if (readerTotalTime) readerTotalTime.textContent = formatReaderTime(duration);
+  const percent = duration > 0 ? (current / duration) * 100 : 0;
+  if (readerScrubberFill) readerScrubberFill.style.width = `${percent}%`;
+  if (readerScrubberThumb) readerScrubberThumb.style.left = `${percent}%`;
+  if (readerScrubberTrack) {
+    readerScrubberTrack.setAttribute('aria-valuenow', Math.round(percent));
+  }
+}
+
+function toggleReaderPlayPause() {
+  if (!readerAudioElement || !readerAudioElement.src) return;
+  if (readerAudioElement.paused) {
+    stopAudioPlayback(); // zatrzymaj audio z czatu jeśli gra
+    readerAudioElement.play().catch(e => {
+      console.warn('Odtwarzanie zablokowane przez przeglądarkę:', e);
+    });
+  } else {
+    readerAudioElement.pause();
+  }
+}
+
+function seekReader(secondsDelta) {
+  if (!readerAudioElement || !readerAudioElement.src) return;
+  const dur = readerAudioElement.duration || 0;
+  const current = readerAudioElement.currentTime || 0;
+  const target = Math.max(0, Math.min(dur, current + secondsDelta));
+  readerAudioElement.currentTime = target;
+  updateReaderProgress(target, dur);
+}
+
+function stopReaderAudio() {
+  if (!readerAudioElement) return;
+  readerAudioElement.pause();
+  readerAudioElement.currentTime = 0;
+  updateReaderProgress(0, readerAudioElement.duration || 0);
+}
+
+async function handleReaderSynthesize() {
+  const text = (readerTextInput ? readerTextInput.value : '').trim();
+  if (!text) {
+    alert('Wpisz lub wklej tekst, który lektor ma przeczytać.');
+    if (readerTextInput) readerTextInput.focus();
+    return;
+  }
+
+  // Zatrzymaj poprzednie odtwarzanie lektora oraz audio czatu
+  if (readerAudioElement) {
+    readerAudioElement.pause();
+    readerAudioElement.currentTime = 0;
+  }
+  stopAudioPlayback();
+
+  // Upewnij się, że model TTS odpowiada wybranemu głosowi
+  let effectiveTtsModel = state.settings.ttsModel;
+  const isElevenVoice = state.settings.voiceId && !state.settings.voiceId.startsWith('google-') && !state.settings.voiceId.startsWith('pl-PL-');
+  if (isElevenVoice && !effectiveTtsModel.startsWith('eleven_')) {
+    effectiveTtsModel = 'eleven_multilingual_v2';
+    state.settings.ttsModel = effectiveTtsModel;
+    localStorage.setItem('tts_model', effectiveTtsModel);
+    if (ttsModelSelect) ttsModelSelect.value = effectiveTtsModel;
+  }
+
+  // Ustawienie stanu ładowania UI
+  if (readerSynthesizeBtn) readerSynthesizeBtn.disabled = true;
+  if (readerSpinner) readerSpinner.hidden = false;
+  if (readerBtnIcon) readerBtnIcon.hidden = true;
+  if (readerSubmitBtnText) readerSubmitBtnText.textContent = 'Trwa synteza...';
+  const voiceName = getVoiceName(state.settings.voiceId);
+  const modelName = getTtsModelName(effectiveTtsModel);
+  if (readerStatusText) {
+    readerStatusText.textContent = `Generowanie nagrania lektora (${voiceName} • ${modelName})...`;
+  }
+  if (playerStateBadge) playerStateBadge.className = 'player-live-badge busy';
+  if (playerStateText) playerStateText.textContent = 'Generowanie audio...';
+
+  const startTime = performance.now();
+
+  try {
+    const ttsHeaders = { 'Content-Type': 'application/json' };
+    if (state.keys.elevenLabs) ttsHeaders['x-elevenlabs-key'] = state.keys.elevenLabs;
+    if (state.keys.google) ttsHeaders['x-google-key'] = state.keys.google;
+
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: ttsHeaders,
+      body: JSON.stringify({
+        text: text,
+        voiceId: state.settings.voiceId,
+        modelId: effectiveTtsModel
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Błąd syntezy (${res.status})`);
+    }
+
+    const durationHeader = res.headers.get('X-Duration-Sec');
+    const ttsMethod = res.headers.get('X-TTS-Method') || modelName;
+    const rawFallbackReason = res.headers.get('X-TTS-Fallback-Reason');
+    const fallbackReason = rawFallbackReason ? decodeURIComponent(rawFallbackReason) : null;
+    const durationSec = durationHeader ? `${Number(durationHeader).toFixed(1)}s` : `${((performance.now() - startTime) / 1000).toFixed(1)}s`;
+
+    const blob = await res.blob();
+    const audioUrl = URL.createObjectURL(blob);
+    currentReaderAudioUrl = audioUrl;
+
+    // Aktywacja karty odtwarzacza
+    if (readerPlayerEmpty) readerPlayerEmpty.hidden = true;
+    if (readerPlayerActive) readerPlayerActive.hidden = false;
+
+    if (readerAudioElement) {
+      readerAudioElement.src = audioUrl;
+      readerAudioElement.playbackRate = parseFloat(readerSpeedSelect ? readerSpeedSelect.value : 1);
+    }
+
+    if (readerDownloadLink) {
+      readerDownloadLink.href = audioUrl;
+      readerDownloadLink.download = `lektor-${Date.now()}.mp3`;
+    }
+
+    if (readerTrackTitle) {
+      const snippet = text.slice(0, 48).replace(/[\r\n]+/g, ' ');
+      readerTrackTitle.textContent = snippet.length < text.length ? `${snippet}...` : snippet;
+    }
+    if (readerTrackMeta) {
+      if (ttsMethod.includes('Fallback')) {
+        readerTrackMeta.innerHTML = `Głos: <strong>${voiceName}</strong> • Silnik: <span style="color:#d97706; font-weight:600;">⚠️ ${ttsMethod}</span> • Czas: ${durationSec}`;
+      } else {
+        readerTrackMeta.textContent = `Głos: ${voiceName} • Silnik: ${ttsMethod} • Wygenerowano w: ${durationSec}`;
+      }
+    }
+
+    updateReaderProgress(0, 0);
+
+    if (readerStatusText) {
+      if (fallbackReason) {
+        readerStatusText.innerHTML = `⚠️ <strong>Awaryjny silnik:</strong> ${fallbackReason} Zastosowano bezpłatny lektor zastępczy (${ttsMethod}). Aby odblokować pełną jakość ElevenLabs, wklej własny klucz API w <a href="#" id="openSettingsFromWarning" style="color:var(--accent); font-weight:600; text-decoration:underline;">Ustawieniach</a>.`;
+        const link = document.getElementById('openSettingsFromWarning');
+        if (link) {
+          link.addEventListener('click', (e) => {
+            e.preventDefault();
+            openSettingsPanel();
+          });
+        }
+      } else {
+        readerStatusText.textContent = `✅ Gotowe! Nagranie przygotowane w ${durationSec}.`;
+      }
+    }
+
+    // Dodaj nagranie do historii sesji (maks. 10 ostatnich)
+    const recId = `rec-${Date.now()}`;
+    const historyItem = {
+      id: recId,
+      text: text,
+      voiceId: state.settings.voiceId,
+      voiceName: voiceName,
+      modelName: modelName,
+      ttsMethod: ttsMethod,
+      isFallback: ttsMethod.includes('Fallback') || Boolean(fallbackReason),
+      fallbackReason: fallbackReason || null,
+      blob: blob,
+      audioUrl: audioUrl,
+      durationSec: durationSec,
+      createdAt: new Date(),
+      formattedTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    };
+    addReaderHistoryItem(historyItem);
+
+    // Auto-odtworzenie
+    try {
+      await readerAudioElement.play();
+    } catch (e) {
+      console.warn('Auto-play zablokowany przez przeglądarkę:', e);
+      if (playerStateBadge) playerStateBadge.className = 'player-live-badge ready';
+      if (playerStateText) playerStateText.textContent = 'Kliknij Odtwórz, aby posłuchać';
+    }
+  } catch (error) {
+    console.error('Błąd syntezy czytnika:', error);
+    if (readerStatusText) {
+      readerStatusText.textContent = `⚠️ Błąd: ${error.message}`;
+    }
+    if (playerStateBadge) playerStateBadge.className = 'player-live-badge';
+    if (playerStateText) playerStateText.textContent = 'Błąd generowania';
+    alert(`Nie udało się wygenerować mowy lektora: ${error.message}`);
+  } finally {
+    if (readerSynthesizeBtn) readerSynthesizeBtn.disabled = false;
+    if (readerSpinner) readerSpinner.hidden = true;
+    if (readerBtnIcon) readerBtnIcon.hidden = false;
+    if (readerSubmitBtnText) readerSubmitBtnText.textContent = 'Generuj nagranie lektora';
+  }
+}
+
+// ==========================================
+// Reader Session History Management (Max 10 Recordings)
+// ==========================================
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function addReaderHistoryItem(item) {
+  if (!state.readerHistory) state.readerHistory = [];
+
+  // Jeśli przekroczono limit 10 nagrań, usuwamy najstarsze nagranie i zwalniamy URL
+  if (state.readerHistory.length >= MAX_READER_HISTORY) {
+    const oldest = state.readerHistory.pop();
+    if (oldest && oldest.audioUrl && oldest.audioUrl !== currentReaderAudioUrl) {
+      URL.revokeObjectURL(oldest.audioUrl);
+    }
+  }
+
+  state.readerHistory.unshift(item);
+  state.activeHistoryId = item.id;
+  renderReaderHistory();
+}
+
+function renderReaderHistory() {
+  if (!historyList || !historyEmpty) return;
+
+  const count = state.readerHistory ? state.readerHistory.length : 0;
+  if (historyCounterPill) {
+    historyCounterPill.textContent = `${count} / ${MAX_READER_HISTORY}`;
+  }
+
+  if (count === 0) {
+    historyEmpty.hidden = false;
+    historyList.hidden = true;
+    historyList.innerHTML = '';
+    return;
+  }
+
+  historyEmpty.hidden = true;
+  historyList.hidden = false;
+  historyList.innerHTML = '';
+
+  const isAudioPlaying = readerAudioElement && !readerAudioElement.paused && !readerAudioElement.ended;
+
+  state.readerHistory.forEach(item => {
+    const isCurrent = state.activeHistoryId === item.id;
+    const isThisPlaying = isCurrent && isAudioPlaying;
+
+    const el = document.createElement('div');
+    el.className = `history-item${isCurrent ? ' active' : ''}`;
+    el.dataset.id = item.id;
+
+    const cleanText = (item.text || '').replace(/[\r\n]+/g, ' ').trim();
+    const shortText = cleanText.length > 95 ? `${cleanText.slice(0, 95)}...` : cleanText;
+
+    el.innerHTML = `
+      <div class="history-item-left">
+        <button type="button" class="history-play-btn" data-action="toggle-play" title="${isThisPlaying ? 'Wstrzymaj odtwarzanie' : 'Odtwórz to nagranie'}" aria-label="${isThisPlaying ? 'Wstrzymaj' : 'Odtwórz'}">
+          <svg class="h-icon-play" viewBox="0 0 24 24" fill="currentColor" ${isThisPlaying ? 'hidden' : ''}>
+            <polygon points="6 4 20 12 6 20 6 4"></polygon>
+          </svg>
+          <svg class="h-icon-pause" viewBox="0 0 24 24" fill="currentColor" ${isThisPlaying ? '' : 'hidden'}>
+            <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+            <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+          </svg>
+        </button>
+        <div class="history-item-content">
+          <div class="history-item-meta">
+            <span class="history-voice-tag">${escapeHtml(item.voiceName || 'Lektor')}</span>
+            <span class="history-meta-divider">•</span>
+            <span class="history-method-tag ${item.isFallback ? 'fallback' : ''}">${escapeHtml(item.ttsMethod || 'TTS')}</span>
+            <span class="history-meta-divider">•</span>
+            <span class="history-time-tag">${escapeHtml(item.formattedTime || '')}</span>
+            ${item.durationSec ? `<span class="history-meta-divider">•</span><span class="history-duration-tag">⏱️ ${escapeHtml(item.durationSec)}</span>` : ''}
+          </div>
+          <p class="history-text-snippet" title="${escapeHtml(cleanText)}">${escapeHtml(shortText)}</p>
+        </div>
+      </div>
+      <div class="history-item-actions">
+        <button type="button" class="history-action-btn primary" data-action="load-editor" title="Wczytaj tekst i przygotuj odtwarzacz">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+          <span>Wczytaj tekst</span>
+        </button>
+        <a href="${item.audioUrl}" download="nagranie-${item.id}.mp3" class="history-action-btn" title="Pobierz plik audio MP3">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <span>MP3</span>
+        </a>
+        <button type="button" class="history-action-btn danger" data-action="delete" title="Usuń z historii">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    `;
+
+    // Obsługa zdarzeń dla karty nagrania
+    const togglePlayBtn = el.querySelector('[data-action="toggle-play"]');
+    if (togglePlayBtn) {
+      togglePlayBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        playOrPauseHistoryItem(item);
+      });
+    }
+
+    const loadEditorBtn = el.querySelector('[data-action="load-editor"]');
+    if (loadEditorBtn) {
+      loadEditorBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        loadHistoryItemIntoPlayer(item, false);
+      });
+    }
+
+    const deleteBtn = el.querySelector('[data-action="delete"]');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeHistoryItem(item.id);
+      });
+    }
+
+    // Kliknięcie w dowolną część wiersza wczytuje i odtwarza nagranie
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('button, a')) return;
+      playOrPauseHistoryItem(item);
+    });
+
+    historyList.appendChild(el);
+  });
+}
+
+function loadHistoryItemIntoPlayer(item, shouldPlay = false) {
+  state.activeHistoryId = item.id;
+  currentReaderAudioUrl = item.audioUrl;
+
+  if (readerTextInput) {
+    readerTextInput.value = item.text;
+    updateReaderStats();
+  }
+
+  if (readerPlayerEmpty) readerPlayerEmpty.hidden = true;
+  if (readerPlayerActive) readerPlayerActive.hidden = false;
+
+  if (readerAudioElement) {
+    readerAudioElement.src = item.audioUrl;
+    readerAudioElement.playbackRate = parseFloat(readerSpeedSelect ? readerSpeedSelect.value : 1);
+  }
+
+  if (readerDownloadLink) {
+    readerDownloadLink.href = item.audioUrl;
+    readerDownloadLink.download = `nagranie-${item.id}.mp3`;
+  }
+
+  if (readerTrackTitle) {
+    const snippet = item.text.slice(0, 48).replace(/[\r\n]+/g, ' ');
+    readerTrackTitle.textContent = snippet.length < item.text.length ? `${snippet}...` : snippet;
+  }
+
+  if (readerTrackMeta) {
+    if (item.isFallback) {
+      readerTrackMeta.innerHTML = `Głos: <strong>${escapeHtml(item.voiceName)}</strong> • Silnik: <span style="color:#d97706; font-weight:600;">⚠️ ${escapeHtml(item.ttsMethod)}</span> • Wygenerowano: ${escapeHtml(item.formattedTime)}`;
+    } else {
+      readerTrackMeta.textContent = `Głos: ${item.voiceName} • Silnik: ${item.ttsMethod} • Wygenerowano: ${item.formattedTime}`;
+    }
+  }
+
+  if (readerStatusText) {
+    if (item.fallbackReason) {
+      readerStatusText.innerHTML = `⚠️ <strong>Nagranie z sesji:</strong> ${escapeHtml(item.fallbackReason)} (${escapeHtml(item.ttsMethod)}).`;
+    } else {
+      readerStatusText.textContent = `Wczytano nagranie z sesji (${item.voiceName} • ${item.formattedTime}).`;
+    }
+  }
+
+  updateReaderProgress(0, 0);
+
+  if (shouldPlay && readerAudioElement) {
+    readerAudioElement.play().catch(e => console.warn('Auto-play blocked:', e));
+  }
+
+  renderReaderHistory();
+}
+
+function playOrPauseHistoryItem(item) {
+  if (state.activeHistoryId === item.id && readerAudioElement && readerAudioElement.src === item.audioUrl) {
+    if (readerAudioElement.paused || readerAudioElement.ended) {
+      readerAudioElement.play().catch(e => console.warn(e));
+    } else {
+      readerAudioElement.pause();
+    }
+  } else {
+    loadHistoryItemIntoPlayer(item, true);
+  }
+}
+
+function removeHistoryItem(id) {
+  const index = state.readerHistory.findIndex(it => it.id === id);
+  if (index !== -1) {
+    const [removed] = state.readerHistory.splice(index, 1);
+    if (removed && removed.audioUrl && removed.audioUrl !== currentReaderAudioUrl) {
+      URL.revokeObjectURL(removed.audioUrl);
+    }
+    if (state.activeHistoryId === id) {
+      state.activeHistoryId = state.readerHistory[0]?.id || null;
+    }
+    renderReaderHistory();
+  }
+}
+
+function clearReaderHistory() {
+  if (!state.readerHistory || state.readerHistory.length === 0) return;
+  if (!confirm('Czy na pewno chcesz wyczyścić historię ostatnich nagrań z bieżącej sesji?')) return;
+
+  state.readerHistory.forEach(item => {
+    if (item.audioUrl && item.audioUrl !== currentReaderAudioUrl) {
+      URL.revokeObjectURL(item.audioUrl);
+    }
+  });
+  state.readerHistory = [];
+  state.activeHistoryId = null;
+  renderReaderHistory();
+}
+
+function updateHistoryPlayIcons(isPlaying) {
+  if (!historyList) return;
+  const items = historyList.querySelectorAll('.history-item');
+  items.forEach(el => {
+    const id = el.dataset.id;
+    const isCurrent = state.activeHistoryId === id;
+    const playIcon = el.querySelector('.h-icon-play');
+    const pauseIcon = el.querySelector('.h-icon-pause');
+    const playBtn = el.querySelector('.history-play-btn');
+
+    if (isCurrent) {
+      el.classList.add('active');
+      if (isPlaying) {
+        if (playIcon) playIcon.hidden = true;
+        if (pauseIcon) pauseIcon.hidden = false;
+        if (playBtn) playBtn.setAttribute('title', 'Wstrzymaj odtwarzanie');
+      } else {
+        if (playIcon) playIcon.hidden = false;
+        if (pauseIcon) pauseIcon.hidden = true;
+        if (playBtn) playBtn.setAttribute('title', 'Odtwórz to nagranie');
+      }
+    } else {
+      el.classList.remove('active');
+      if (playIcon) playIcon.hidden = false;
+      if (pauseIcon) pauseIcon.hidden = true;
+      if (playBtn) playBtn.setAttribute('title', 'Odtwórz to nagranie');
+    }
+  });
+}
+
+function setupScrubberEvents() {
+  if (!readerScrubberTrack) return;
+
+  function seekFromEvent(e) {
+    if (!readerAudioElement || !readerAudioElement.duration) return;
+    const rect = readerScrubberTrack.getBoundingClientRect();
+    const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const target = fraction * readerAudioElement.duration;
+    readerAudioElement.currentTime = target;
+    updateReaderProgress(target, readerAudioElement.duration);
+  }
+
+  readerScrubberTrack.addEventListener('click', (e) => {
+    seekFromEvent(e);
+  });
+
+  let isDragging = false;
+  readerScrubberTrack.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    seekFromEvent(e);
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (isDragging) {
+      seekFromEvent(e);
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
+
+  readerScrubberTrack.addEventListener('touchstart', (e) => {
+    isDragging = true;
+    seekFromEvent(e);
+  }, { passive: true });
+
+  window.addEventListener('touchmove', (e) => {
+    if (isDragging) {
+      seekFromEvent(e);
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchend', () => {
+    isDragging = false;
+  });
+}
+
+function setupReaderAudioListeners() {
+  if (!readerAudioElement) return;
+
+  readerAudioElement.addEventListener('loadedmetadata', () => {
+    if (readerTotalTime) {
+      readerTotalTime.textContent = formatReaderTime(readerAudioElement.duration);
+    }
+  });
+
+  readerAudioElement.addEventListener('timeupdate', () => {
+    updateReaderProgress(readerAudioElement.currentTime, readerAudioElement.duration || 0);
+  });
+
+  readerAudioElement.addEventListener('play', () => {
+    if (readerPlayIcon) readerPlayIcon.hidden = true;
+    if (readerPauseIcon) readerPauseIcon.hidden = false;
+    if (readerPlayPauseBtn) readerPlayPauseBtn.setAttribute('aria-label', 'Wstrzymaj');
+    if (readerWaveform) readerWaveform.classList.add('playing');
+    if (playerStateBadge) playerStateBadge.className = 'player-live-badge playing';
+    if (playerStateText) playerStateText.textContent = 'Odtwarzanie...';
+    updateHistoryPlayIcons(true);
+  });
+
+  readerAudioElement.addEventListener('pause', () => {
+    if (readerPlayIcon) readerPlayIcon.hidden = false;
+    if (readerPauseIcon) readerPauseIcon.hidden = true;
+    if (readerPlayPauseBtn) readerPlayPauseBtn.setAttribute('aria-label', 'Odtwórz');
+    if (readerWaveform) readerWaveform.classList.remove('playing');
+    if (playerStateBadge) playerStateBadge.className = 'player-live-badge ready';
+    if (playerStateText) playerStateText.textContent = 'Wstrzymano';
+    updateHistoryPlayIcons(false);
+  });
+
+  readerAudioElement.addEventListener('ended', () => {
+    if (readerPlayIcon) readerPlayIcon.hidden = false;
+    if (readerPauseIcon) readerPauseIcon.hidden = true;
+    if (readerPlayPauseBtn) readerPlayPauseBtn.setAttribute('aria-label', 'Odtwórz');
+    if (readerWaveform) readerWaveform.classList.remove('playing');
+    if (playerStateBadge) playerStateBadge.className = 'player-live-badge ready';
+    if (playerStateText) playerStateText.textContent = 'Zakończono';
+    updateReaderProgress(readerAudioElement.duration || 0, readerAudioElement.duration || 0);
+    updateHistoryPlayIcons(false);
+  });
+}
+
+function initReaderModule() {
+  initWaveformBars();
+  updateReaderStats();
+  updateReaderSystemPill();
+  setupScrubberEvents();
+  setupReaderAudioListeners();
+  renderReaderHistory();
+
+  // Nawigacja
+  if (navChatBtn) navChatBtn.addEventListener('click', () => switchView('chat'));
+  if (navReaderBtn) navReaderBtn.addEventListener('click', () => switchView('reader'));
+  if (brandHomeLink) {
+    brandHomeLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchView('chat');
+    });
+  }
+  if (readerBackBtn) readerBackBtn.addEventListener('click', () => switchView('chat'));
+  if (readerEditSettingsBtn) readerEditSettingsBtn.addEventListener('click', openSettingsPanel);
+
+  // Czyszczenie historii nagrań sesji
+  if (readerClearHistoryBtn) {
+    readerClearHistoryBtn.addEventListener('click', clearReaderHistory);
+  }
+
+  // Zmiana hasha w URL
+  window.addEventListener('hashchange', () => {
+    if (window.location.hash === '#tekst' || window.location.hash === '#przeczytaj-tekst') {
+      switchView('reader');
+    } else if (!window.location.hash || window.location.hash === '#chat') {
+      switchView('chat');
+    }
+  });
+
+  // Wstępne sprawdzenie hasha przy starcie
+  if (window.location.hash === '#tekst' || window.location.hash === '#przeczytaj-tekst') {
+    switchView('reader');
+  }
+
+  // Obsługa pola tekstowego
+  if (readerTextInput) {
+    readerTextInput.addEventListener('input', updateReaderStats);
+  }
+
+  if (readerPasteBtn) {
+    readerPasteBtn.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          readerTextInput.value = text;
+          updateReaderStats();
+          readerTextInput.focus();
+        }
+      } catch (err) {
+        alert('Nie udało się automatycznie odczytać schowka. Użyj skrótu Ctrl+V / Cmd+V, aby wkleić tekst.');
+      }
+    });
+  }
+
+  if (readerSampleBtn) {
+    readerSampleBtn.addEventListener('click', () => {
+      if (readerTextInput) {
+        readerTextInput.value = SAMPLE_TEXT;
+        updateReaderStats();
+        readerTextInput.focus();
+      }
+    });
+  }
+
+  if (readerClearBtn) {
+    readerClearBtn.addEventListener('click', () => {
+      if (!readerTextInput.value || confirm('Czy na pewno chcesz wyczyścić wpisany tekst?')) {
+        readerTextInput.value = '';
+        updateReaderStats();
+        readerTextInput.focus();
+      }
+    });
+  }
+
+  if (readerSynthesizeBtn) {
+    readerSynthesizeBtn.addEventListener('click', handleReaderSynthesize);
+  }
+
+  // Kontrolki odtwarzacza
+  if (readerPlayPauseBtn) {
+    readerPlayPauseBtn.addEventListener('click', toggleReaderPlayPause);
+  }
+
+  if (readerRewindBtn) {
+    readerRewindBtn.addEventListener('click', () => seekReader(-5));
+  }
+
+  if (readerForwardBtn) {
+    readerForwardBtn.addEventListener('click', () => seekReader(5));
+  }
+
+  if (readerStopBtn) {
+    readerStopBtn.addEventListener('click', stopReaderAudio);
+  }
+
+  if (readerSpeedSelect) {
+    readerSpeedSelect.addEventListener('change', () => {
+      if (readerAudioElement) {
+        readerAudioElement.playbackRate = parseFloat(readerSpeedSelect.value);
+      }
+    });
+  }
 }
 
 window.addEventListener('DOMContentLoaded', init);

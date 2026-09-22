@@ -650,25 +650,120 @@ app.post('/api/tts', async (req, res) => {
   }
 
   const cleanText = text.trim();
-  const targetVoiceId = voiceId || process.env.VOICE_ID || process.env.ELEVENLABS_VOICE_ID || 'google-gemini-neural';
-  const targetModelId = modelId || process.env.TTS_MODEL || process.env.ELEVENLABS_TTS_MODEL || 'gemini-2.5-flash-preview-tts';
 
-  function finalizeAudioResponse(audioBuffer, contentType = 'audio/mpeg', method = 'TTS') {
+  // Rozpoznanie intencji dostawcy na podstawie głosu i modelu
+  const isElevenRequested = Boolean(
+    (voiceId && !voiceId.startsWith('google-') && !voiceId.startsWith('pl-PL-')) ||
+    (modelId && modelId.startsWith('eleven_'))
+  );
+
+  const isWaveNetRequested = Boolean(
+    (voiceId && voiceId.startsWith('pl-PL-Wavenet')) ||
+    (modelId === 'google-cloud-wavenet')
+  );
+
+  const isEdgeRequested = Boolean(
+    (voiceId === 'pl-PL-MarekNeural' || voiceId === 'pl-PL-ZofiaNeural' || modelId === 'edge-neural') &&
+    !isElevenRequested
+  );
+
+  const isGeminiRequested = Boolean(
+    (voiceId === 'google-gemini-neural' || (modelId && modelId.includes('gemini'))) &&
+    !isElevenRequested && !isWaveNetRequested && !isEdgeRequested
+  );
+
+  const targetVoiceId = voiceId || (isElevenRequested ? (process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL') : (process.env.VOICE_ID || 'google-gemini-neural'));
+  const targetModelId = modelId || (isElevenRequested ? (process.env.ELEVENLABS_TTS_MODEL || 'eleven_multilingual_v2') : (process.env.TTS_MODEL || 'gemini-2.5-flash-preview-tts'));
+
+  let ttsFallbackReason = null;
+
+  function finalizeAudioResponse(audioBuffer, contentType = 'audio/mpeg', method = 'TTS', fallbackReason = null) {
     const durationMs = Date.now() - startTime;
     const durationSec = +(durationMs / 1000).toFixed(2);
-    res.set({
+    const reason = fallbackReason || ttsFallbackReason;
+    const headers = {
       'Content-Type': contentType,
       'Content-Length': audioBuffer.length,
       'Cache-Control': 'no-cache',
       'X-Duration-Ms': String(durationMs),
-      'X-Duration-Sec': String(durationSec)
-    });
-    console.log(`⏱️ [TTS - ${method}] Wygenerowano audio w ${durationMs}ms (${durationSec}s)`);
+      'X-Duration-Sec': String(durationSec),
+      'X-TTS-Method': method,
+      'Access-Control-Expose-Headers': 'X-Duration-Ms, X-Duration-Sec, X-TTS-Method, X-TTS-Fallback-Reason'
+    };
+    if (reason) {
+      headers['X-TTS-Fallback-Reason'] = encodeURIComponent(reason);
+    }
+    res.set(headers);
+    console.log(`⏱️ [TTS - ${method}] Wygenerowano audio w ${durationMs}ms (${durationSec}s)${reason ? ` (Powód fallbacku: ${reason})` : ''}`);
     return res.send(audioBuffer);
   }
 
-  // 1. Google Gemini TTS (Modele: gemini-2.5-flash-preview-tts, gemini-3.1-flash-tts-preview)
-  if (targetVoiceId === 'google-gemini-neural' || (targetModelId && targetModelId.includes('gemini'))) {
+  // 1. ElevenLabs TTS (Priorytet, gdy wybrano głos lub model ElevenLabs)
+  if (isElevenRequested || (targetVoiceId && !targetVoiceId.startsWith('google-') && !targetVoiceId.startsWith('pl-PL-')) || (targetModelId && targetModelId.startsWith('eleven_'))) {
+    const apiKey = getElevenLabsKey(req);
+    if (apiKey) {
+      try {
+        const elevenVoiceId = (targetVoiceId && !targetVoiceId.startsWith('google-') && !targetVoiceId.startsWith('pl-PL-'))
+          ? targetVoiceId
+          : (process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL');
+        const elevenModelId = (targetModelId && targetModelId.startsWith('eleven_'))
+          ? targetModelId
+          : (process.env.ELEVENLABS_TTS_MODEL || 'eleven_multilingual_v2');
+
+        // Dynamiczne, naturalne nastawy w zależności od modelu
+        const isV2 = elevenModelId === 'eleven_multilingual_v2';
+        const voiceSettings = isV2 ? {
+          stability: 0.38,
+          similarity_boost: 0.8,
+          style: 0.35,
+          use_speaker_boost: true
+        } : {
+          stability: 0.4,
+          similarity_boost: 0.75
+        };
+
+        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${elevenVoiceId}`, {
+          method: 'POST',
+          headers: {
+            'xi-api-key': apiKey,
+            'Content-Type': 'application/json',
+            'Accept': 'audio/mpeg'
+          },
+          body: JSON.stringify({
+            text: cleanText,
+            model_id: elevenModelId,
+            voice_settings: voiceSettings
+          })
+        });
+
+        if (response.ok) {
+          const audioBuffer = Buffer.from(await response.arrayBuffer());
+          return finalizeAudioResponse(audioBuffer, 'audio/mpeg', `ElevenLabs (${elevenModelId})`);
+        }
+        const errDetails = await response.text().catch(() => '');
+        console.warn(`ElevenLabs TTS zwrócił status ${response.status}: ${errDetails}. Przełączanie na fallback...`);
+        try {
+          const parsed = JSON.parse(errDetails);
+          if (parsed.detail?.code === 'quota_exceeded' || parsed.detail?.status === 'quota_exceeded') {
+            ttsFallbackReason = 'Wyczerpano limit kredytów ElevenLabs (quota exceeded).';
+          } else if (parsed.detail?.message) {
+            ttsFallbackReason = `ElevenLabs: ${parsed.detail.message}`;
+          }
+        } catch {
+          ttsFallbackReason = `ElevenLabs zwrócił błąd ${response.status}`;
+        }
+      } catch (err) {
+        console.warn('ElevenLabs TTS błąd:', err.message);
+        ttsFallbackReason = `ElevenLabs błąd połączenia: ${err.message}`;
+      }
+    } else {
+      console.warn('Wybrano ElevenLabs, ale brak klucza API (ELEVENLABS_API_KEY). Fallback do Edge Neural...');
+      ttsFallbackReason = 'Brak klucza API ElevenLabs.';
+    }
+  }
+
+  // 2. Google Gemini TTS
+  if (isGeminiRequested || targetVoiceId === 'google-gemini-neural' || (targetModelId && targetModelId.includes('gemini'))) {
     const googleKey = getGoogleKey(req);
     if (googleKey) {
       try {
@@ -698,8 +793,8 @@ app.post('/api/tts', async (req, res) => {
     }
   }
 
-  // 2. Google Cloud WaveNet (z fallbackiem do Edge Neural tak jak w sts)
-  if (targetVoiceId.startsWith('pl-PL-Wavenet') || targetModelId === 'google-cloud-wavenet') {
+  // 3. Google Cloud WaveNet (z fallbackiem do Edge Neural)
+  if (isWaveNetRequested || targetVoiceId.startsWith('pl-PL-Wavenet') || targetModelId === 'google-cloud-wavenet') {
     const googleKey = getGoogleKey(req);
     if (googleKey) {
       try {
@@ -738,8 +833,8 @@ app.post('/api/tts', async (req, res) => {
     }
   }
 
-  // 3. Głosy Edge Neural (Marek / Zofia z projektu sts)
-  if (targetVoiceId === 'pl-PL-MarekNeural' || targetVoiceId === 'pl-PL-ZofiaNeural' || targetModelId === 'edge-neural') {
+  // 4. Głosy Edge Neural (Marek / Zofia z projektu sts)
+  if (isEdgeRequested || targetVoiceId === 'pl-PL-MarekNeural' || targetVoiceId === 'pl-PL-ZofiaNeural' || targetModelId === 'edge-neural') {
     const edgeVoice = (targetVoiceId === 'pl-PL-ZofiaNeural') ? 'pl-PL-ZofiaNeural' : 'pl-PL-MarekNeural';
     try {
       const audioBuffer = await synthesizeWithEdge(cleanText, edgeVoice);
@@ -749,50 +844,13 @@ app.post('/api/tts', async (req, res) => {
     }
   }
 
-  // 4. ElevenLabs TTS
-  const apiKey = getElevenLabsKey(req);
-  if (apiKey) {
-    try {
-      const elevenVoiceId = (targetVoiceId && !targetVoiceId.startsWith('google-') && !targetVoiceId.startsWith('pl-PL-'))
-        ? targetVoiceId
-        : (process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL');
-      const elevenModelId = (targetModelId && targetModelId.startsWith('eleven_'))
-        ? targetModelId
-        : (process.env.ELEVENLABS_TTS_MODEL || 'eleven_multilingual_v2');
-
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${elevenVoiceId}`, {
-        method: 'POST',
-        headers: {
-          'xi-api-key': apiKey,
-          'Content-Type': 'application/json',
-          'Accept': 'audio/mpeg'
-        },
-        body: JSON.stringify({
-          text: cleanText,
-          model_id: elevenModelId,
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0.0,
-            use_speaker_boost: true
-          }
-        })
-      });
-
-      if (response.ok) {
-        const audioBuffer = Buffer.from(await response.arrayBuffer());
-        return finalizeAudioResponse(audioBuffer, 'audio/mpeg', 'ElevenLabs');
-      }
-      console.warn(`ElevenLabs TTS zwrócił ${response.status}, fallback do Edge Neural...`);
-    } catch (err) {
-      console.warn('ElevenLabs TTS error:', err.message);
-    }
-  }
-
-  // 5. Ostateczny fallback: Edge Neural Marek (zawsze darmowy, naturalny PL)
+  // 5. Ostateczny fallback: Edge Neural (dopasowany płcią do wybranego głosu)
   try {
-    const audioBuffer = await synthesizeWithEdge(cleanText, 'pl-PL-MarekNeural');
-    return finalizeAudioResponse(audioBuffer, 'audio/mpeg', 'Edge Neural Fallback');
+    const isFemaleVoice = targetVoiceId === 'EXAVITQu4vr4xnSDxMaL' || targetVoiceId === 'pl-PL-ZofiaNeural';
+    const fallbackEdgeVoice = isFemaleVoice ? 'pl-PL-ZofiaNeural' : 'pl-PL-MarekNeural';
+    const fallbackLabel = fallbackEdgeVoice === 'pl-PL-ZofiaNeural' ? 'Zofia' : 'Marek';
+    const audioBuffer = await synthesizeWithEdge(cleanText, fallbackEdgeVoice);
+    return finalizeAudioResponse(audioBuffer, 'audio/mpeg', `Edge Neural Fallback (${fallbackLabel})`);
   } catch (err) {
     console.error('All TTS methods failed:', err);
     res.status(500).json({ error: 'Nie udało się wygenerować audio żadną z dostępnych metod.' });
