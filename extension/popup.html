@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Echo – lektor</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <div class="brand">Echo <span>lektor</span></div>
+    <div class="server-dot" id="serverDot" title="Stan serwera"></div>
+  </header>
+
+  <section class="status" id="statusBox">
+    <div class="status-line">
+      <span class="status-label" id="statusLabel">Gotowy</span>
+      <span class="status-progress" id="statusProgress"></span>
+    </div>
+    <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+    <p class="status-preview" id="statusPreview">Zaznacz tekst na stronie i kliknij „Przeczytaj”, użyj menu pod prawym przyciskiem albo skrótu <kbd id="shortcutHint">Alt+Shift+R</kbd>.</p>
+  </section>
+
+  <div class="controls">
+    <button class="btn primary" id="readBtn" type="button">Przeczytaj zaznaczenie</button>
+    <button class="btn" id="pauseBtn" type="button" disabled>Pauza</button>
+    <button class="btn" id="stopBtn" type="button" disabled>Stop</button>
+  </div>
+
+  <section class="settings">
+    <label class="field">
+      <span>Głos</span>
+      <select id="voiceSelect"></select>
+    </label>
+    <label class="field">
+      <span>Silnik TTS</span>
+      <select id="modelSelect"></select>
+    </label>
+    <label class="field">
+      <span>Prędkość</span>
+      <select id="speedSelect">
+        <option value="0.75">0.75×</option>
+        <option value="1">1.0×</option>
+        <option value="1.25">1.25×</option>
+        <option value="1.5">1.5×</option>
+        <option value="2">2.0×</option>
+      </select>
+    </label>
+
+    <details class="advanced">
+      <summary>Serwer i klucze API</summary>
+      <label class="field">
+        <span>Adres serwera Echo</span>
+        <input id="serverInput" type="url" placeholder="http://localhost:3000" spellcheck="false">
+      </label>
+      <label class="field">
+        <span>Klucz ElevenLabs <em>(opcjonalny)</em></span>
+        <input id="elevenKeyInput" type="password" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">
+        <span>Klucz Google <em>(opcjonalny)</em></span>
+        <input id="googleKeyInput" type="password" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">
+        <span>Klucz OpenAI <em>(opcjonalny)</em></span>
+        <input id="openaiKeyInput" type="password" autocomplete="off" spellcheck="false">
+      </label>
+      <p class="hint">Klucze są potrzebne tylko wtedy, gdy nie ma ich w pliku <code>.env</code> serwera.</p>
+      <button class="btn small" id="saveServerBtn" type="button">Zapisz</button>
+    </details>
+  </section>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

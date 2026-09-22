@@ -1,104 +1,333 @@
-# 🎙️ Voice AI Chat (Google Gemini & Claude + ElevenLabs / Web Speech)
+# echo
 
-Prosta i nowoczesna aplikacja webowa do prowadzenia naturalnej, płynnej rozmowy głosowej człowieka ze sztuczną inteligencją, obsługująca modele **Google Gemini** oraz **Anthropic Claude**.
+Rozmawiaj z AI głosem — po polsku, naturalnie, bez klikania. Mówisz, echo słucha, myśli i odpowiada na głos.
 
----
-
-## 🔄 Przepływ konwersacji (Pipeline)
+echo to lokalna aplikacja webowa, która łączy trzy klocki: **rozpoznawanie mowy**, **model językowy** i **syntezę głosu**. Każdy z nich możesz wybrać osobno spośród kilku dostawców (Google, OpenAI, Anthropic, ElevenLabs, Groq, Microsoft Edge).
 
 ```
-[ Głos użytkownika ]
-        │
-        ▼ (Mikrofon / Web Audio API)
-1. [ STT: ElevenLabs Scribe / Web Speech API ] ──► Transkrypcja mowy na tekst
-        │
-        ▼
-2. [ Google Gemini / Claude API ]              ──► Generowanie zwięzłej, naturalnej odpowiedzi głosowej
-        │
-        ▼
-3. [ TTS: ElevenLabs / Google Gemini Voice ]   ──► Synteza realistycznego głosu w języku polskim
-        │
-        ▼
-[ Odtwarzanie głosu AI w przeglądarce + sferyczny wizualizer audio ]
+ 🎙️ Twój głos ──► STT (mowa → tekst) ──► LLM (odpowiedź) ──► TTS (tekst → mowa) ──► 🔊 głos AI
 ```
 
 ---
 
-## ✨ Kluczowe funkcje
+## Spis treści
 
-- **Modele Google Gemini (na podstawie projektu `sts`)**:
-  - **Gemini 3.6 Flash** (`gemini-3.6-flash`) – domyślny, szybki i stabilny model konwersacyjny.
-  - **Gemini 3.8 Flash** (`gemini-3.8-flash`) – najnowsza generacja modeli Flash.
-  - **Gemini Flash Latest** (`gemini-flash-latest`) – zawsze aktualna wersja Flash.
-  - **Gemini 2.5 Pro** (`gemini-2.5-pro`) & **Gemini 3.1 Pro Preview** (`gemini-3.1-pro-preview`) – głęboka analiza.
-  - **Automatyczny mechanizm Fallback**: Jeśli wybrany model Google zwróci błąd przeciążenia (503/429), zapytanie automatycznie próbuje kolejnych modeli (`gemini-3.6-flash` ➔ `gemini-flash-latest` ➔ `gemini-3.8-flash`).
-- **Modele Anthropic Claude**:
-  - Pełne wsparcie dla Claude Opus 5, Claude Opus 4.6, Claude Sonnet 5 i Claude Haiku 4.5.
-- **Krok 1: STT (Speech-to-Text)**:
-  - **ElevenLabs Scribe** (`scribe_v2` / `scribe_v1`) – wysoka precyzja.
-  - **Web Speech API** – darmowe, wbudowane w przeglądarkę rozpoznawanie mowy w języku polskim (bez wymogu klucza ElevenLabs).
-- **Krok 3: TTS (Text-to-Speech)**:
-  - Głosy **ElevenLabs** (Sarah, Antoni, George, Adam).
-  - Głos **Google Gemini Voice** (`google-gemini-neural`).
-- **Wizualizer Canvas**: Płynnie animowana sfera audio reagująca w czasie rzeczywistym na poziom głośności mikrofonu i mowę asystenta.
-- **Wskaźnik postępu (Pipeline Tracker)**: Wizualne podświetlanie aktualnego etapu (`1. Głos` ➔ `2. Model AI` ➔ `3. Odpowiedź`).
-- **Historia czatu**: Wgląd w pełną transkrypcję rozmowy, informację który model odpowiedział oraz przycisk ponownego odsłuchania głosu.
-- **Wygodne sterowanie**:
-  - Kliknięcie przycisku mikrofonu lub naciśnięcie **Spacji**.
-  - Wpisywanie wiadomości z klawiatury (klawisz Enter).
+**Dla użytkowników**
+- [Co potrafi](#co-potrafi)
+- [Uruchomienie w 5 minut](#uruchomienie-w-5-minut)
+- [Jakie klucze API są potrzebne](#jakie-klucze-api-są-potrzebne)
+- [Jak korzystać](#jak-korzystać)
+- [Wtyczka Chrome](#wtyczka-chrome)
+- [Gdy coś nie działa](#gdy-coś-nie-działa)
+
+**Dla deweloperów**
+- [Architektura](#architektura)
+- [Struktura projektu](#struktura-projektu)
+- [API serwera](#api-serwera)
+- [Rozpoznawanie dostawcy](#rozpoznawanie-dostawcy)
+- [Fallbacki](#fallbacki)
+- [Konfiguracja (.env)](#konfiguracja-env)
+- [Dodawanie nowego dostawcy](#dodawanie-nowego-dostawcy)
 
 ---
 
-## 🚀 Szybki start
+# Dla użytkowników
 
-### 1. Wymagania
-- Node.js (wersja 18+ lub nowsza)
+## Co potrafi
 
-### 2. Instalacja zależności
+- **Rozmowa głosowa** — naciśnij spację, powiedz coś, naciśnij ponownie. echo odpowie głosem. Możesz też pisać z klawiatury. Animowana sfera reaguje na Twój głos i głos asystenta, a wskaźnik pokazuje, na którym etapie jest odpowiedź (słuchanie → myślenie → mówienie).
+- **Historia rozmowy** — pełna transkrypcja z informacją, który model odpowiedział, i przyciskiem ponownego odsłuchania.
+- **Lektor** — wklej dowolny tekst (artykuł, notatkę), a echo przeczyta go na głos. Nagranie odtworzysz, przewiniesz i pobierzesz jako MP3. Ostatnie 10 nagrań zostaje w historii sesji.
+- **Wtyczka Chrome** — zaznacz tekst na dowolnej stronie i posłuchaj go jednym skrótem.
+- **Wybór modeli** — w ustawieniach (⚙️) wybierasz osobno model rozpoznawania mowy, model AI, głos i silnik syntezy.
+- **Odporność na awarie** — gdy wybrany głos jest niedostępny (np. brak kredytów), echo przełącza się na darmowy głos Edge zamiast milknąć.
+
+## Uruchomienie w 5 minut
+
+Potrzebujesz **Node.js 18 lub nowszego** i przeglądarki opartej na Chromium (Chrome, Edge, Arc, Brave).
+
 ```bash
+# 1. Zainstaluj zależności
 npm install
-```
 
-### 3. Konfiguracja kluczy API
-Skopiuj plik `.env.example` do `.env`:
-```bash
+# 2. Utwórz plik z konfiguracją
 cp .env.example .env
-```
-Następnie uzupełnij klucze w `.env`:
-```env
-GOOGLE_API_KEY=twoj_klucz_google_gemini
-GEMINI_API_KEY=twoj_klucz_google_gemini
-ELEVENLABS_API_KEY=twoj_klucz_elevenlabs
-ANTHROPIC_API_KEY=twoj_klucz_anthropic
-```
-*(Uwaga: Możesz również uruchomić aplikację i wpisać klucze bezpośrednio w panelu ustawień ⚙️ w przeglądarce — zostaną zapisane w `localStorage`).*
 
-### 4. Uruchomienie serwera
-```bash
+# 3. Wpisz w .env co najmniej jeden klucz (patrz niżej), np. GOOGLE_API_KEY
+
+# 4. Uruchom
 npm start
 ```
-lub w trybie deweloperskim (auto-restart przy zmianach w kodzie):
-```bash
-npm run dev
-```
 
-Aplikacja będzie dostępna pod adresem:
-👉 **http://localhost:3000**
+Otwórz **http://localhost:3000** i pozwól przeglądarce na dostęp do mikrofonu.
+
+> Klucze możesz też wpisać w ustawieniach aplikacji (⚙️) zamiast w `.env`. Zostaną zapamiętane tylko w Twojej przeglądarce.
+
+## Jakie klucze API są potrzebne
+
+**Najprostszy start: jeden klucz Google.** Wystarcza do wszystkich trzech etapów (Gemini rozpoznaje mowę, odpowiada i mówi). Darmowy klucz wygenerujesz w [Google AI Studio](https://aistudio.google.com/apikey).
+
+Pozostałe klucze są opcjonalne — dodaj je, jeśli chcesz korzystać z konkretnych modeli:
+
+| Dostawca | Rozpoznawanie mowy | Model AI | Głos | Skąd wziąć klucz | Zmienna w `.env` |
+|---|:---:|:---:|:---:|---|---|
+| Google | ✅ Gemini | ✅ Gemini | ✅ Gemini, WaveNet | [aistudio.google.com](https://aistudio.google.com/apikey) | `GOOGLE_API_KEY` |
+| OpenAI | ✅ GPT Transcribe, Whisper | ✅ GPT | ✅ 13 głosów | [platform.openai.com](https://platform.openai.com/api-keys) | `OPEN_API_KEY` |
+| Anthropic | — | ✅ Claude | — | [console.anthropic.com](https://console.anthropic.com/settings/keys) | `ANTHROPIC_API_KEY` |
+| ElevenLabs | ✅ Scribe | — | ✅ głosy studyjne | [elevenlabs.io](https://elevenlabs.io/app/settings/api-keys) | `ELEVENLABS_API_KEY` |
+| Groq | ✅ Whisper (darmowy plan) | — | — | [console.groq.com](https://console.groq.com/keys) | `GROQ_API_KEY` |
+| Przeglądarka / Edge | ✅ Web Speech | — | ✅ Marek, Zofia | **bez klucza** | — |
+
+Rozmowa zawsze wymaga klucza do **modelu AI** (Google, OpenAI lub Anthropic). Rozpoznawanie mowy (Web Speech) i głos (Edge: Marek, Zofia) działają bez żadnego klucza.
+
+## Jak korzystać
+
+### Rozmowa
+
+| Akcja | Jak |
+|---|---|
+| Zacznij / skończ mówić | **Spacja** albo przycisk mikrofonu |
+| Napisz zamiast mówić | Pole tekstowe + **Enter** |
+| Zmień modele i głos | ⚙️ w prawym górnym rogu |
+| Zamknij ustawienia | **Esc** |
+
+W ustawieniach możesz też zmienić **prompt systemowy**, czyli instrukcję, jak asystent ma się zachowywać. Domyślnie odpowiada krótko, w 1–3 zdaniach, i bez formatowania, bo wszystko jest czytane na głos.
+
+**Głos a silnik syntezy:** *głos* to barwa i tożsamość (Marek, Nova, Sarah), *silnik* to model, który go generuje (Edge, gpt-4o-mini-tts, Eleven Multilingual). Po wybraniu głosu echo samo dobiera pasujący silnik.
+
+### Lektor
+
+Przejdź do zakładki **„Przeczytaj tekst”**, wklej tekst i kliknij przycisk syntezy. Licznik pokazuje liczbę znaków, słów i szacowany czas czytania.
+
+| Akcja | Skrót |
+|---|---|
+| Odtwórz / pauza | **Spacja** |
+| Przewiń o 5 s | **←** / **→** |
+
+Prędkość odtwarzania ustawisz od 0,75× do 2×.
+
+## Wtyczka Chrome
+
+Wtyczka czyta na głos tekst zaznaczony na dowolnej stronie. Korzysta z Twojego serwera echo, więc musi on być uruchomiony.
+
+**Instalacja**
+
+1. Uruchom serwer: `npm start`.
+2. Wejdź na `chrome://extensions` i włącz **Tryb dewelopera** (prawy górny róg).
+3. Kliknij **Załaduj rozpakowane** i wskaż folder `extension/`.
+
+**Użycie**
+
+- zaznacz tekst → prawy przycisk myszy → **Przeczytaj z Echo**,
+- albo skrót **Alt+Shift+R** (zatrzymanie: **Alt+Shift+S**),
+- albo ikona wtyczki → **Przeczytaj zaznaczenie**.
+
+W okienku wtyczki wybierzesz głos, silnik i prędkość, wstrzymasz lub zatrzymasz czytanie. Kropka w rogu pokazuje, czy serwer odpowiada (zielona) czy nie (czerwona). Skróty zmienisz w `chrome://extensions/shortcuts`.
+
+Długie teksty są czytane kawałkami: pierwszy fragment jest krótki, żeby lektor zaczął od razu, a kolejne generują się w tle, zanim skończy się bieżący.
+
+## Gdy coś nie działa
+
+| Objaw | Co zrobić |
+|---|---|
+| Przeglądarka nie pyta o mikrofon | Otwórz aplikację przez `http://localhost:3000` — mikrofon działa tylko na `localhost` lub `https`. |
+| „Wymaga klucza API” w nagłówku | Brakuje klucza do wybranego modelu. Sprawdź tabelę kluczy i ustawienia (⚙️). Klucz z `.env` jest oznaczony jako „Aktywny w .env”. |
+| Słychać inny głos niż wybrany | Wybrany dostawca zwrócił błąd (np. brak kredytów), więc echo użyło głosu Edge. Powód jest w konsoli serwera. |
+| „You have no credits remaining” | Konto OpenAI nie ma środków. Doładuj je albo wybierz innego dostawcę. |
+| Wtyczka: „Brak połączenia z serwerem Echo” | Uruchom `npm start`. Jeśli serwer działa pod innym adresem, zmień go w wtyczce w sekcji **Serwer i klucze API**. |
+| Wtyczka: „Nie zaznaczono tekstu” | Na stronach `chrome://` i w Chrome Web Store wtyczki nie mają dostępu do treści — to ograniczenie przeglądarki. |
+| Web Speech nie rozpoznaje mowy | Web Speech API działa tylko w przeglądarkach opartych na Chromium i wymaga internetu. |
 
 ---
 
-## ⚙️ Dostępne parametry konfiguracyjne
+# Dla deweloperów
 
-W pliku `.env` lub w panelu ustawień aplikacji (ikona ⚙️ w prawym górnym rogu):
+## Architektura
 
-| Zmienna | Domyślna wartość | Opis |
-|---------|------------------|------|
-| `PORT` | `3000` | Port serwera HTTP |
-| `GOOGLE_API_KEY` | - | Klucz API Google AI Studio / Gemini |
-| `GEMINI_API_KEY` | - | Alias dla klucza Google Gemini API |
-| `AI_MODEL` | `gemini-3.6-flash` | Domyślny model AI (`gemini-3.6-flash`, `gemini-3.8-flash`, `claude-opus-5`) |
-| `ANTHROPIC_API_KEY` | - | Klucz API z platformy Anthropic Claude |
-| `ELEVENLABS_API_KEY` | - | Klucz API z platformy ElevenLabs |
-| `ELEVENLABS_VOICE_ID` | `EXAVITQu4vr4xnSDxMaL` | ID głosu (Sarah - darmowy premade) |
-| `ELEVENLABS_TTS_MODEL`| `eleven_multilingual_v2` | Model TTS (`eleven_multilingual_v2` lub `eleven_turbo_v2_5`) |
-| `ELEVENLABS_STT_MODEL`| `scribe_v2` | Model transkrypcji mowy (`scribe_v2`, `scribe_v1`, `web_speech`) |
+```
+┌──────────────────────┐      ┌───────────────────────────────┐      ┌──────────────────────┐
+│  public/ (SPA)       │      │  server.js (Express)          │      │  Dostawcy            │
+│  index.html, app.js  │─────►│  /api/stt   → routing modelu  │─────►│  Google, OpenAI,     │
+│                      │      │  /api/chat  → routing modelu  │      │  Anthropic, Groq,    │
+│  extension/ (MV3)    │─────►│  /api/tts   → routing głosu   │      │  ElevenLabs, Edge    │
+└──────────────────────┘      └───────────────────────────────┘      └──────────────────────┘
+```
+
+- **Serwer** (`server.js`) to cienkie proxy: przyjmuje zapytanie, na podstawie identyfikatora modelu lub głosu wybiera dostawcę, wywołuje jego API i zwraca wynik w ujednoliconym formacie. Klucze z `.env` nigdy nie trafiają do przeglądarki.
+- **Frontend** (`public/`) to jedna strona bez frameworka i bez kroku budowania. Ustawienia i klucze wpisane przez użytkownika trzyma w `localStorage`.
+- **Wtyczka** (`extension/`) korzysta z tego samego `/api/tts` co lektor.
+
+Cały projekt to zwykły JavaScript (ES modules), bez TypeScriptu, bundlera i testów automatycznych.
+
+```bash
+npm start      # node server.js
+npm run dev    # node --watch server.js (restart po zmianach)
+```
+
+## Struktura projektu
+
+```
+server.js              # cały backend: endpointy, integracje z dostawcami, fallbacki
+public/
+  index.html           # widoki: rozmowa, lektor, panel ustawień
+  app.js               # logika UI: nagrywanie, pipeline, lektor, historia, ustawienia
+  style.css
+extension/             # wtyczka Chrome (Manifest V3)
+  manifest.json
+  background.js        # service worker: menu kontekstowe, skróty, pobranie zaznaczenia
+  offscreen.js         # odtwarzanie audio + kolejka fragmentów z prefetchem
+  chunker.js           # dzielenie tekstu na fragmenty (Intl.Segmenter)
+  popup.html/.js/.css  # okienko: głos, silnik, prędkość, sterowanie
+  shared.js            # domyślne ustawienia, dopasowanie głos → silnik
+.env.example           # wzorzec konfiguracji (ta sama struktura co .env)
+```
+
+## API serwera
+
+Każdy endpoint przyjmuje klucze w nagłówkach, które mają pierwszeństwo przed `.env`:
+
+| Nagłówek | Dostawca |
+|---|---|
+| `x-google-key` (alias `x-gemini-key`) | Google |
+| `x-openai-key` | OpenAI |
+| `x-anthropic-key` | Anthropic |
+| `x-elevenlabs-key` | ElevenLabs |
+| `x-groq-key` | Groq |
+
+Odpowiedzi STT, czatu i TTS zawierają nagłówki `X-Duration-Ms` i `X-Duration-Sec` z czasem przetwarzania.
+
+### `GET /api/status`
+
+Informuje, które klucze są ustawione w `.env` (bez ich wartości), oraz zwraca domyślne modele.
+
+```json
+{ "status": "ok", "hasEnvGoogle": true, "hasEnvOpenAI": false, "hasEnvAnthropic": true,
+  "hasEnvElevenLabs": false, "hasEnvGroq": true,
+  "defaults": { "voiceId": "...", "ttsModel": "...", "sttModel": "...", "aiModel": "..." } }
+```
+
+### `GET /api/models`
+
+Lista modeli AI pogrupowana według dostawców. Jeśli jest klucz, listy Google i Anthropic są pobierane na żywo z API, a lista OpenAI jest zawężana do modeli dostępnych dla klucza. Bez klucza zwracane są listy domyślne. `/api/claude-models` to alias zachowany dla zgodności.
+
+```json
+{ "googleModels": [...], "claudeModels": [...], "openaiModels": [...], "models": [...] }
+```
+
+### `GET /api/voices`
+
+Głosy Google/Edge, OpenAI i ElevenLabs. Z kluczem ElevenLabs zwraca też własne głosy z konta.
+
+```json
+{ "voices": [{ "voice_id": "openai-marin", "name": "Marin (...)", "category": "openai" }] }
+```
+
+### `POST /api/stt` — mowa na tekst
+
+`multipart/form-data`:
+
+| Pole | Opis |
+|---|---|
+| `audio` | plik audio (webm, mp3, wav, m4a; maks. 25 MB) |
+| `model_id` | np. `gemini-3.5-transcribe`, `gpt-transcribe`, `whisper-1`, `whisper-large-v3-turbo`, `scribe_v2` |
+| `language_code` | domyślnie `pl`; `auto` włącza autodetekcję |
+
+```json
+{ "text": "Dzień dobry", "model": "gpt-transcribe", "provider": "openai", "language_code": "pl", "duration_ms": 812 }
+```
+
+### `POST /api/chat` — odpowiedź modelu
+
+```json
+{ "model": "gpt-5.6-luna",
+  "messages": [{ "role": "user", "content": "Cześć!" }],
+  "systemPrompt": "opcjonalnie — nadpisuje domyślny prompt" }
+```
+
+```json
+{ "text": "Cześć! W czym mogę pomóc?", "model": "gpt-5.6-luna", "provider": "openai",
+  "fallbackUsed": false, "originalModelRequested": "gpt-5.6-luna", "usage": {...}, "duration_ms": 1830 }
+```
+
+Domyślny prompt systemowy każe odpowiadać krótko i bez Markdownu, bo odpowiedź jest czytana przez syntezator.
+
+### `POST /api/tts` — tekst na mowę
+
+```json
+{ "text": "Tekst do przeczytania", "voiceId": "openai-marin", "modelId": "gpt-4o-mini-tts" }
+```
+
+Zwraca plik audio (`audio/mpeg`, a dla Gemini TTS `audio/wav`) oraz nagłówki:
+
+| Nagłówek | Znaczenie |
+|---|---|
+| `X-TTS-Method` | dostawca i model, który faktycznie wygenerował audio |
+| `X-TTS-Fallback-Reason` | powód fallbacku (URL-encoded); brak nagłówka = bez fallbacku |
+
+## Rozpoznawanie dostawcy
+
+Serwer nie przyjmuje osobnego pola „provider” — wybiera dostawcę na podstawie konwencji w identyfikatorach. **To najważniejsza rzecz do zapamiętania przy dodawaniu modeli.**
+
+| Etap | Identyfikator | Dostawca |
+|---|---|---|
+| STT | `gemini-*`, `web_speech` | Google |
+| STT | `whisper-large*` | Groq |
+| STT | `whisper-1`, `gpt-*transcribe*` | OpenAI |
+| STT | pozostałe (`scribe_*`) | ElevenLabs |
+| Czat | zawiera `gemini` lub `gemma` | Google |
+| Czat | `gpt-*`, `chatgpt-*`, `o<cyfra>*` | OpenAI |
+| Czat | pozostałe | Anthropic |
+| Głos | `google-gemini-*` | Gemini TTS |
+| Głos | `pl-PL-Wavenet-*` | Google Cloud WaveNet |
+| Głos | `pl-PL-MarekNeural`, `pl-PL-ZofiaNeural` | Edge Neural (bez klucza) |
+| Głos | `openai-<nazwa>` | OpenAI TTS |
+| Głos | pozostałe | ElevenLabs (ID głosu) |
+
+Te same reguły są zaimplementowane w trzech miejscach, które trzeba zmieniać razem: funkcje pomocnicze na początku `server.js`, na początku `public/app.js` oraz `modelsForVoice()` w `extension/shared.js`.
+
+## Fallbacki
+
+| Etap | Zachowanie przy błędzie |
+|---|---|
+| Czat — Gemini | przy każdym błędzie próbuje kolejno `gemini-3.6-flash` → `gemini-flash-latest` → `gemini-3.8-flash` → `gemini-2.5-pro` |
+| Czat — Claude | przy 404 (brak modelu) przechodzi na kolejny model Claude |
+| Czat — OpenAI | przy `model_not_found` przechodzi na kolejny model z listy domyślnej |
+| STT — ElevenLabs | bez klucza ElevenLabs używa Gemini (jeśli jest klucz Google) |
+| STT — OpenAI | jeśli model odrzuci parametr `language`, ponawia z autodetekcją |
+| TTS — dowolny | przy błędzie generuje audio głosem Edge Neural dopasowanym płcią; powód trafia do `X-TTS-Fallback-Reason` |
+
+Modele OpenAI z rodziny rozumującej (`gpt-5*`, `gpt-6*`, `o*`) dostają `reasoning_effort: low` i nie dostają `temperature`, której nie obsługują. Tekst dla OpenAI TTS dłuższy niż 4000 znaków jest dzielony po zdaniach, a pliki MP3 są sklejane.
+
+## Konfiguracja (.env)
+
+`.env` i `.env.example` mają tę samą strukturę — przy dodawaniu zmiennej aktualizuj oba pliki. Wartości zaczynające się od `twoj_klucz` są traktowane jak brak klucza.
+
+| Zmienna | Domyślnie | Opis |
+|---|---|---|
+| `PORT` | `3000` | port serwera |
+| `GOOGLE_API_KEY` / `GEMINI_API_KEY` | — | klucz Google (wystarczy jeden z nich) |
+| `OPEN_API_KEY` / `OPENAI_API_KEY` | — | klucz OpenAI (obie nazwy działają) |
+| `ANTHROPIC_API_KEY` | — | klucz Anthropic |
+| `ELEVENLABS_API_KEY` | — | klucz ElevenLabs |
+| `GROQ_API_KEY` | — | klucz Groq |
+| `AI_MODEL` | `gemini-3.6-flash` | model czatu, gdy zapytanie go nie podaje (`CLAUDE_MODEL` to starszy alias) |
+| `STT_MODEL` | `gemini-3.5-transcribe` | model rozpoznawania mowy, gdy zapytanie go nie podaje |
+| `VOICE_ID` | `google-gemini-neural` | domyślny głos |
+| `TTS_MODEL` | `gemini-2.5-flash-preview-tts` | domyślny silnik syntezy |
+| `ELEVENLABS_VOICE_ID` | `EXAVITQu4vr4xnSDxMaL` | głos ElevenLabs, gdy wybrano model `eleven_*` bez głosu ElevenLabs |
+| `ELEVENLABS_TTS_MODEL` | `eleven_multilingual_v2` | model ElevenLabs, gdy wybrano głos ElevenLabs bez modelu |
+| `ELEVENLABS_STT_MODEL` | `scribe_v2` | starszy alias dla `STT_MODEL` |
+
+Pełna lista dostępnych wartości jest w komentarzach w `.env.example`.
+
+## Dodawanie nowego dostawcy
+
+Na przykładzie integracji OpenAI:
+
+1. **Klucz** — dodaj funkcję `get<Dostawca>Key(req)` w `server.js` (nagłówek `x-<dostawca>-key` → `.env`) i flagę `hasEnv<Dostawca>` w `/api/status`.
+2. **Konwencja nazw** — wybierz identyfikatory, które nie kolidują z istniejącymi regułami (patrz [Rozpoznawanie dostawcy](#rozpoznawanie-dostawcy)). Głosy ElevenLabs to „wszystko inne”, więc nowe głosy potrzebują własnego prefiksu.
+3. **Endpointy** — dodaj gałąź w `/api/stt`, `/api/chat` lub `/api/tts` *przed* gałęzią domyślną i zwracaj ten sam format odpowiedzi co pozostali dostawcy.
+4. **Listy** — dopisz modele do `/api/models` lub głosy do `/api/voices` oraz statyczne `<option>` w `public/index.html` (widoczne, zanim lista załaduje się z API).
+5. **Frontend** — w `public/app.js`: stan klucza (`state.keys`, `localStorage`), pole w ustawieniach, nagłówek w każdym `fetch`, sprawdzanie klucza w `updateApiStatusBadge()` i `startRecording()`, nazwy w `get*Name()` i dopasowanie w `syncVoiceAndTtsModel()`.
+6. **Wtyczka** — przy nowych głosach zaktualizuj `extension/shared.js` (głosy zapasowe i `modelsForVoice()`) oraz pole klucza w `popup.html`/`popup.js`.
+7. **Konfiguracja** — dodaj zmienną do `.env.example` i `.env` oraz do tabeli w tym README.

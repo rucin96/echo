@@ -328,7 +328,7 @@
 
   <footer class="app-footer">
     <span>Naturalna rozmowa. Nowa perspektywa.</span>
-    <span>STT & TTS: <strong>Google & ElevenLabs</strong><span class="footer-divider">/</span>LLM: <strong>Gemini & Claude</strong></span>
+    <span>STT & TTS: <strong>Google, Groq, OpenAI & ElevenLabs</strong><span class="footer-divider">/</span>LLM: <strong>Gemini, Claude & GPT</strong></span>
   </footer>
 </main>
     <!-- Technical Settings Panel (Slide-Over Drawer) -->
@@ -343,7 +343,7 @@
             </div>
             <div>
               <h3 id="drawerTitle">Ustawienia Studia</h3>
-              <p class="drawer-subtitle">Konfiguracja modeli Google (STT/LLM/TTS), Claude i ElevenLabs</p>
+              <p class="drawer-subtitle">Konfiguracja modeli Google (STT/LLM/TTS), OpenAI (STT/LLM/TTS), Groq (STT), Claude i ElevenLabs</p>
             </div>
           </div>
           <button class="close-btn" id="closeSettingsBtn" aria-label="Zamknij panel">&times;</button>
@@ -393,6 +393,28 @@
                 <button type="button" class="toggle-password" data-target="elevenLabsKeyInput" title="Pokaż / ukryj">&#128065;</button>
               </div>
             </div>
+
+            <div class="form-group">
+              <label for="groqKeyInput">
+                <span>Groq API Key (Whisper STT - darmowy plan)</span>
+                <span class="env-flag" id="groqEnvFlag"></span>
+              </label>
+              <div class="input-with-toggle">
+                <input type="password" id="groqKeyInput" placeholder="gsk_..." />
+                <button type="button" class="toggle-password" data-target="groqKeyInput" title="Pokaż / ukryj">&#128065;</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="openaiKeyInput">
+                <span>OpenAI API Key (GPT, TTS i Transcribe)</span>
+                <span class="env-flag" id="openaiEnvFlag"></span>
+              </label>
+              <div class="input-with-toggle">
+                <input type="password" id="openaiKeyInput" placeholder="sk-..." />
+                <button type="button" class="toggle-password" data-target="openaiKeyInput" title="Pokaż / ukryj">&#128065;</button>
+              </div>
+            </div>
           </div>
 
           <!-- Section 2: Voice & TTS -->
@@ -410,6 +432,14 @@
                     <option value="pl-PL-Wavenet-D">Google Cloud WaveNet D (Kobieta)</option>
                     <option value="pl-PL-MarekNeural">Marek (Mężczyzna - Naturalny PL)</option>
                     <option value="pl-PL-ZofiaNeural">Zofia (Kobieta - Naturalna PL)</option>
+                  </optgroup>
+                  <optgroup label="Głosy OpenAI">
+                    <option value="openai-marin">Marin (Naturalny, najnowszy - OpenAI)</option>
+                    <option value="openai-cedar">Cedar (Naturalny, najnowszy - OpenAI)</option>
+                    <option value="openai-alloy">Alloy (Neutralny - OpenAI)</option>
+                    <option value="openai-coral">Coral (Kobiecy - OpenAI)</option>
+                    <option value="openai-nova">Nova (Kobiecy, energiczny - OpenAI)</option>
+                    <option value="openai-onyx">Onyx (Męski, głęboki - OpenAI)</option>
                   </optgroup>
                   <optgroup label="Głosy ElevenLabs">
                     <option value="EXAVITQu4vr4xnSDxMaL">Sarah (Ciepła, wyrazista)</option>
@@ -429,6 +459,11 @@
                     <option value="google-cloud-wavenet">Google Cloud WaveNet (REST API)</option>
                     <option value="edge-neural">Edge Neural PL (Marek / Zofia - Ultra naturalny)</option>
                   </optgroup>
+                  <optgroup label="Modele OpenAI TTS">
+                    <option value="gpt-4o-mini-tts">OpenAI GPT-4o mini TTS (Najnowszy, sterowany instrukcją)</option>
+                    <option value="tts-1-hd">OpenAI TTS-1 HD (Wyższa jakość)</option>
+                    <option value="tts-1">OpenAI TTS-1 (Niska latencja)</option>
+                  </optgroup>
                   <optgroup label="Modele ElevenLabs">
                     <option value="eleven_multilingual_v2">Eleven Multilingual v2 (Jakość studyjna)</option>
                     <option value="eleven_flash_v2_5">Eleven Flash v2.5 (Błyskawiczny & naturalny)</option>
@@ -438,7 +473,7 @@
               </div>
             </div>
             <div class="field-hint" style="font-size:11px; color:#787b70; margin-top:8px; line-height:1.45; background:#f4f2ea; padding:8px 11px; border-radius:7px; border:1px solid #e5e3d8;">
-              💡 <strong>Głos lektora</strong> określa tożsamość i barwę (np. Marek, Zofia, Sarah), a <strong>Model syntezy</strong> to silnik generujący audio (Edge Neural, Gemini TTS, WaveNet, ElevenLabs). Wybór głosu automatycznie dopasowuje optymalny model.
+              💡 <strong>Głos lektora</strong> określa tożsamość i barwę (np. Marek, Zofia, Sarah), a <strong>Model syntezy</strong> to silnik generujący audio (Edge Neural, Gemini TTS, WaveNet, OpenAI, ElevenLabs). Wybór głosu automatycznie dopasowuje optymalny model.
             </div>
           </div>
 
@@ -455,6 +490,16 @@
                     <option value="gemini-3.6-flash">Gemini 3.6 Flash Transcribe (Multimodalny)</option>
                     <option value="web_speech">Web Speech API (Wbudowane w przeglądarkę - sts)</option>
                   </optgroup>
+                  <optgroup label="Modele Groq STT (Whisper - darmowy plan)">
+                    <option value="whisper-large-v3-turbo">Groq Whisper Large v3 Turbo (Szybki & darmowy)</option>
+                    <option value="whisper-large-v3">Groq Whisper Large v3 (Najdokładniejszy Whisper)</option>
+                  </optgroup>
+                  <optgroup label="Modele OpenAI STT">
+                    <option value="gpt-transcribe">OpenAI GPT Transcribe (Najdokładniejszy OpenAI)</option>
+                    <option value="gpt-4o-transcribe">GPT-4o Transcribe</option>
+                    <option value="gpt-4o-mini-transcribe">GPT-4o mini Transcribe (Szybki & tani)</option>
+                    <option value="whisper-1">OpenAI Whisper (whisper-1)</option>
+                  </optgroup>
                   <optgroup label="Modele ElevenLabs STT">
                     <option value="scribe_v2">ElevenLabs Scribe v2 (Rekomendowany)</option>
                     <option value="scribe_v1">ElevenLabs Scribe v1</option>
@@ -463,7 +508,7 @@
               </div>
 
               <div class="form-group flex-1">
-                <label for="claudeModelSelect">Model AI (Google Gemini / Claude):</label>
+                <label for="claudeModelSelect">Model AI (Google Gemini / Claude / OpenAI):</label>
                 <select id="claudeModelSelect">
                   <optgroup label="Google Gemini (z projektu sts)">
                     <option value="gemini-3.6-flash" selected>Gemini 3.6 Flash (Szybki & stabilny - sts)</option>
@@ -477,6 +522,12 @@
                     <option value="claude-opus-4-6">Claude Opus 4.6 (Szybki Opus)</option>
                     <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Lekki & szybki)</option>
                     <option value="claude-sonnet-5">Claude Sonnet 5</option>
+                  </optgroup>
+                  <optgroup label="OpenAI GPT">
+                    <option value="gpt-5.6-luna">GPT-5.6 Luna (Szybki & tani)</option>
+                    <option value="gpt-5.6-terra">GPT-5.6 Terra (Zbalansowany)</option>
+                    <option value="gpt-5.6-sol">GPT-5.6 Sol (Flagowy)</option>
+                    <option value="gpt-6-astra">GPT-6 Astra (Najpotężniejszy OpenAI)</option>
                   </optgroup>
                 </select>
               </div>

@@ -19,13 +19,49 @@ if (!initialVoiceId || initialVoiceId === '21m00Tcm4TlvDq8ikWAM') {
 let initialSttModel = localStorage.getItem('stt_model') || 'gemini-3.5-transcribe';
 let initialTtsModel = localStorage.getItem('tts_model') || 'gemini-2.5-flash-preview-tts';
 
-// Auto-reconciliation if ElevenLabs voice was chosen with non-ElevenLabs model or vice versa
-const isElevenInitVoice = initialVoiceId && !initialVoiceId.startsWith('google-') && !initialVoiceId.startsWith('pl-PL-');
-if (isElevenInitVoice && !initialTtsModel.startsWith('eleven_')) {
-  initialTtsModel = 'eleven_multilingual_v2';
+// Głosy OpenAI mają prefiks "openai-"; każdy inny identyfikator spoza Google/Edge to głos ElevenLabs
+function isOpenAIVoice(voiceId) {
+  return Boolean(voiceId && voiceId.startsWith('openai-'));
+}
+
+function isElevenVoice(voiceId) {
+  return Boolean(voiceId && !voiceId.startsWith('google-') && !voiceId.startsWith('pl-PL-') && !isOpenAIVoice(voiceId));
+}
+
+function isOpenAITtsModel(modelId) {
+  return modelId === 'gpt-4o-mini-tts' || (modelId || '').startsWith('tts-1');
+}
+
+function isOpenAIChatModel(modelId) {
+  return /^(gpt-|chatgpt-|o\d)/.test(modelId || '');
+}
+
+// Groq udostępnia tylko modele whisper-large-v3(-turbo); whisper-1 to model OpenAI
+function isGroqSttModel(modelId) {
+  return Boolean(modelId && modelId.startsWith('whisper-large'));
+}
+
+function isOpenAISttModel(modelId) {
+  return modelId === 'whisper-1' || Boolean(modelId && modelId.startsWith('gpt-') && modelId.includes('transcribe'));
+}
+
+// Model TTS zgodny z dostawcą głosu (null = obecny model pasuje)
+function ttsModelForVoice(voiceId, ttsModel) {
+  if (isOpenAIVoice(voiceId)) return isOpenAITtsModel(ttsModel) ? null : 'gpt-4o-mini-tts';
+  if (isElevenVoice(voiceId)) return ttsModel.startsWith('eleven_') ? null : 'eleven_multilingual_v2';
+  return null;
+}
+
+// Auto-reconciliation if ElevenLabs/OpenAI voice was chosen with a model of another provider or vice versa
+const reconciledInitModel = ttsModelForVoice(initialVoiceId, initialTtsModel);
+if (reconciledInitModel) {
+  initialTtsModel = reconciledInitModel;
   localStorage.setItem('tts_model', initialTtsModel);
-} else if (initialTtsModel.startsWith('eleven_') && (initialVoiceId.startsWith('google-') || initialVoiceId.startsWith('pl-PL-'))) {
+} else if (initialTtsModel.startsWith('eleven_') && !isElevenVoice(initialVoiceId)) {
   initialVoiceId = 'EXAVITQu4vr4xnSDxMaL';
+  localStorage.setItem('voice_id', initialVoiceId);
+} else if (isOpenAITtsModel(initialTtsModel) && !isOpenAIVoice(initialVoiceId)) {
+  initialVoiceId = 'openai-marin';
   localStorage.setItem('voice_id', initialVoiceId);
 }
 
@@ -39,7 +75,9 @@ const state = {
   keys: {
     elevenLabs: localStorage.getItem('elevenlabs_api_key') || '',
     anthropic: localStorage.getItem('anthropic_api_key') || '',
-    google: localStorage.getItem('google_api_key') || ''
+    google: localStorage.getItem('google_api_key') || '',
+    groq: localStorage.getItem('groq_api_key') || '',
+    openai: localStorage.getItem('openai_api_key') || ''
   },
   settings: {
     voiceId: initialVoiceId,
@@ -52,7 +90,9 @@ const state = {
   serverConfig: {
     hasEnvElevenLabs: false,
     hasEnvAnthropic: false,
-    hasEnvGoogle: false
+    hasEnvGoogle: false,
+    hasEnvGroq: false,
+    hasEnvOpenAI: false
   }
 };
 
@@ -279,9 +319,13 @@ const refreshVoicesBtn = document.getElementById('refreshVoicesBtn');
 const elevenLabsKeyInput = document.getElementById('elevenLabsKeyInput');
 const anthropicKeyInput = document.getElementById('anthropicKeyInput');
 const googleKeyInput = document.getElementById('googleKeyInput');
+const groqKeyInput = document.getElementById('groqKeyInput');
+const openaiKeyInput = document.getElementById('openaiKeyInput');
 const elevenLabsEnvFlag = document.getElementById('elevenLabsEnvFlag');
 const anthropicEnvFlag = document.getElementById('anthropicEnvFlag');
 const googleEnvFlag = document.getElementById('googleEnvFlag');
+const groqEnvFlag = document.getElementById('groqEnvFlag');
+const openaiEnvFlag = document.getElementById('openaiEnvFlag');
 const voiceSelect = document.getElementById('voiceSelect');
 const ttsModelSelect = document.getElementById('ttsModelSelect');
 const sttModelSelect = document.getElementById('sttModelSelect');
@@ -328,6 +372,10 @@ function getVoiceName(voiceId) {
     'JBFqnCBsd6RMkjVDRZzb': 'George',
     'pNInz6obpgDQGcFmaJgB': 'Adam'
   };
+  if (isOpenAIVoice(voiceId)) {
+    const name = voiceId.replace('openai-', '');
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
   return defaultMap[voiceId] || 'Głos AI';
 }
 
@@ -348,7 +396,11 @@ function getAiModelName(modelId) {
     'claude-opus-4-6': 'Claude Opus 4.6',
     'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
     'claude-sonnet-5': 'Claude Sonnet 5',
-    'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5'
+    'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5',
+    'gpt-5.6-luna': 'GPT-5.6 Luna',
+    'gpt-5.6-terra': 'GPT-5.6 Terra',
+    'gpt-5.6-sol': 'GPT-5.6 Sol',
+    'gpt-6-astra': 'GPT-6 Astra'
   };
   return modelMap[modelId] || modelId;
 }
@@ -368,6 +420,12 @@ function getSttModelName(modelId) {
     'gemini-3.5-transcribe': 'Gemini Transcribe',
     'gemini-3.6-flash': 'Gemini 3.6 Flash STT',
     'web_speech': 'Web Speech API',
+    'whisper-large-v3-turbo': 'Groq Whisper Turbo',
+    'whisper-large-v3': 'Groq Whisper v3',
+    'gpt-transcribe': 'OpenAI Transcribe',
+    'gpt-4o-transcribe': 'GPT-4o Transcribe',
+    'gpt-4o-mini-transcribe': 'GPT-4o mini Transcribe',
+    'whisper-1': 'OpenAI Whisper',
     'scribe_v2': 'Scribe v2',
     'scribe_v1': 'Scribe v1'
   };
@@ -388,7 +446,10 @@ function getTtsModelName(modelId) {
     'edge-neural': 'Edge Neural',
     'eleven_flash_v2_5': 'Eleven Flash v2.5',
     'eleven_turbo_v2_5': 'Turbo v2.5',
-    'eleven_multilingual_v2': 'Multilingual v2'
+    'eleven_multilingual_v2': 'Multilingual v2',
+    'gpt-4o-mini-tts': 'OpenAI GPT-4o mini TTS',
+    'tts-1-hd': 'OpenAI TTS-1 HD',
+    'tts-1': 'OpenAI TTS-1'
   };
   return map[modelId] || modelId || 'TTS';
 }
@@ -406,8 +467,11 @@ function syncVoiceAndTtsModel(source) {
       ttsModelSelect.value = 'google-cloud-wavenet';
     } else if (currentVoice === 'pl-PL-MarekNeural' || currentVoice === 'pl-PL-ZofiaNeural') {
       ttsModelSelect.value = 'edge-neural';
-    } else if (currentVoice && (!currentVoice.startsWith('google-') && !currentVoice.startsWith('pl-PL-'))) {
-      // ElevenLabs voice ID
+    } else if (isOpenAIVoice(currentVoice)) {
+      if (!isOpenAITtsModel(currentTts)) {
+        ttsModelSelect.value = 'gpt-4o-mini-tts';
+      }
+    } else if (isElevenVoice(currentVoice)) {
       if (!currentTts.startsWith('eleven_')) {
         ttsModelSelect.value = 'eleven_multilingual_v2';
       }
@@ -426,8 +490,12 @@ function syncVoiceAndTtsModel(source) {
         voiceSelect.value = 'pl-PL-MarekNeural';
       }
     } else if (currentTts.startsWith('eleven_')) {
-      if (currentVoice.startsWith('google-') || currentVoice.startsWith('pl-PL-')) {
+      if (!isElevenVoice(currentVoice)) {
         voiceSelect.value = 'EXAVITQu4vr4xnSDxMaL'; // Sarah
+      }
+    } else if (isOpenAITtsModel(currentTts)) {
+      if (!isOpenAIVoice(currentVoice)) {
+        voiceSelect.value = 'openai-marin';
       }
     }
   }
@@ -495,6 +563,8 @@ function loadSavedSettings() {
   if (elevenLabsKeyInput) elevenLabsKeyInput.value = state.keys.elevenLabs;
   if (anthropicKeyInput) anthropicKeyInput.value = state.keys.anthropic;
   if (googleKeyInput) googleKeyInput.value = state.keys.google;
+  if (groqKeyInput) groqKeyInput.value = state.keys.groq;
+  if (openaiKeyInput) openaiKeyInput.value = state.keys.openai;
   if (voiceSelect) voiceSelect.value = state.settings.voiceId;
   if (ttsModelSelect) ttsModelSelect.value = state.settings.ttsModel;
   if (sttModelSelect) sttModelSelect.value = state.settings.sttModel;
@@ -518,6 +588,28 @@ async function checkServerStatus() {
     } else {
       googleEnvFlag.textContent = '';
       googleEnvFlag.style.display = 'none';
+    }
+
+    if (data.hasEnvGroq) {
+      groqEnvFlag.textContent = 'Aktywny w .env';
+      groqEnvFlag.style.display = 'inline-block';
+      if (!groqKeyInput.value) {
+        groqKeyInput.placeholder = 'Klucz aktywny z pliku .env serwera';
+      }
+    } else {
+      groqEnvFlag.textContent = '';
+      groqEnvFlag.style.display = 'none';
+    }
+
+    if (data.hasEnvOpenAI) {
+      openaiEnvFlag.textContent = 'Aktywny w .env';
+      openaiEnvFlag.style.display = 'inline-block';
+      if (!openaiKeyInput.value) {
+        openaiKeyInput.placeholder = 'Klucz aktywny z pliku .env serwera';
+      }
+    } else {
+      openaiEnvFlag.textContent = '';
+      openaiEnvFlag.style.display = 'none';
     }
 
     if (data.hasEnvAnthropic) {
@@ -552,23 +644,32 @@ async function checkServerStatus() {
 function updateApiStatusBadge() {
   const currentModel = state.settings.aiModel || state.settings.claudeModel || 'gemini-3.6-flash';
   const isGoogleLlm = currentModel.startsWith('gemini-') || currentModel.includes('gemini');
+  const isOpenAILlm = isOpenAIChatModel(currentModel);
   const hasGoogleKey = Boolean(state.keys.google || state.serverConfig.hasEnvGoogle);
   const hasClaudeKey = Boolean(state.keys.anthropic || state.serverConfig.hasEnvAnthropic);
-  const hasLlm = isGoogleLlm ? hasGoogleKey : hasClaudeKey;
+  const hasOpenAIKey = Boolean(state.keys.openai || state.serverConfig.hasEnvOpenAI);
+  const hasLlm = isGoogleLlm ? hasGoogleKey : (isOpenAILlm ? hasOpenAIKey : hasClaudeKey);
 
   const isGoogleStt = state.settings.sttModel.startsWith('gemini-') || state.settings.sttModel === 'web_speech';
-  const hasStt = isGoogleStt
-    ? (state.settings.sttModel === 'web_speech' || hasGoogleKey)
-    : Boolean(state.keys.elevenLabs || state.serverConfig.hasEnvElevenLabs || hasGoogleKey);
+  const isGroqStt = isGroqSttModel(state.settings.sttModel);
+  const hasStt = isGroqStt
+    ? Boolean(state.keys.groq || state.serverConfig.hasEnvGroq)
+    : isOpenAISttModel(state.settings.sttModel)
+      ? hasOpenAIKey
+      : isGoogleStt
+      ? (state.settings.sttModel === 'web_speech' || hasGoogleKey)
+      : Boolean(state.keys.elevenLabs || state.serverConfig.hasEnvElevenLabs || hasGoogleKey);
 
   const isGoogleTts = state.settings.voiceId.startsWith('google-') || state.settings.voiceId.startsWith('pl-PL-') || state.settings.ttsModel.includes('gemini') || state.settings.ttsModel.includes('edge') || state.settings.ttsModel.includes('wavenet');
   const hasTts = isGoogleTts
     ? true // Edge Neural jest darmowy, a Gemini używa Google Key
-    : Boolean(state.keys.elevenLabs || state.serverConfig.hasEnvElevenLabs);
+    : isOpenAIVoice(state.settings.voiceId)
+      ? hasOpenAIKey
+      : Boolean(state.keys.elevenLabs || state.serverConfig.hasEnvElevenLabs);
 
   if (hasLlm && hasStt && hasTts) {
     keysStatusBadge.className = 'keys-status-badge ready';
-    const providerTag = isGoogleLlm ? 'Google Gemini' : 'Claude';
+    const providerTag = isGoogleLlm ? 'Google Gemini' : (isOpenAILlm ? 'OpenAI' : 'Claude');
     keysStatusText.textContent = `Studio aktywne (${providerTag})`;
   } else if (hasLlm || hasStt || hasTts) {
     keysStatusBadge.className = 'keys-status-badge';
@@ -594,7 +695,8 @@ async function loadVoices() {
       voiceSelect.innerHTML = '';
 
       const googleVoices = data.voices.filter(v => v.category === 'google');
-      const elevenVoices = data.voices.filter(v => v.category !== 'google');
+      const openaiVoices = data.voices.filter(v => v.category === 'openai');
+      const elevenVoices = data.voices.filter(v => v.category !== 'google' && v.category !== 'openai');
 
       if (googleVoices.length > 0) {
         const groupGoogle = document.createElement('optgroup');
@@ -606,6 +708,18 @@ async function loadVoices() {
           groupGoogle.appendChild(opt);
         });
         voiceSelect.appendChild(groupGoogle);
+      }
+
+      if (openaiVoices.length > 0) {
+        const groupOpenAI = document.createElement('optgroup');
+        groupOpenAI.label = 'Głosy OpenAI';
+        openaiVoices.forEach(v => {
+          const opt = document.createElement('option');
+          opt.value = v.voice_id;
+          opt.textContent = v.name;
+          groupOpenAI.appendChild(opt);
+        });
+        voiceSelect.appendChild(groupOpenAI);
       }
 
       if (elevenVoices.length > 0) {
@@ -638,11 +752,12 @@ async function loadVoices() {
   }
 }
 
-// Load AI models (Google Gemini + Claude) from API
+// Load AI models (Google Gemini + Claude + OpenAI) from API
 async function loadClaudeModels() {
   const headers = {};
   if (state.keys.anthropic) headers['x-anthropic-key'] = state.keys.anthropic;
   if (state.keys.google) headers['x-google-key'] = state.keys.google;
+  if (state.keys.openai) headers['x-openai-key'] = state.keys.openai;
 
   try {
     const res = await fetch('/api/models', { headers });
@@ -677,6 +792,19 @@ async function loadClaudeModels() {
           groupClaude.appendChild(opt);
         });
         claudeModelSelect.appendChild(groupClaude);
+      }
+
+      // Optgroup 3: OpenAI GPT
+      if (data.openaiModels && data.openaiModels.length > 0) {
+        const groupOpenAI = document.createElement('optgroup');
+        groupOpenAI.label = 'OpenAI GPT';
+        data.openaiModels.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.name;
+          groupOpenAI.appendChild(opt);
+        });
+        claudeModelSelect.appendChild(groupOpenAI);
       }
 
       const allOptions = Array.from(claudeModelSelect.querySelectorAll('option'));
@@ -791,6 +919,8 @@ function setupEventListeners() {
     state.keys.elevenLabs = elevenLabsKeyInput.value.trim();
     state.keys.anthropic = anthropicKeyInput.value.trim();
     state.keys.google = googleKeyInput ? googleKeyInput.value.trim() : '';
+    state.keys.groq = groqKeyInput ? groqKeyInput.value.trim() : '';
+    state.keys.openai = openaiKeyInput ? openaiKeyInput.value.trim() : '';
     state.settings.voiceId = voiceSelect.value;
     state.settings.ttsModel = ttsModelSelect.value;
     state.settings.sttModel = sttModelSelect.value;
@@ -801,6 +931,8 @@ function setupEventListeners() {
     localStorage.setItem('elevenlabs_api_key', state.keys.elevenLabs);
     localStorage.setItem('anthropic_api_key', state.keys.anthropic);
     localStorage.setItem('google_api_key', state.keys.google);
+    localStorage.setItem('groq_api_key', state.keys.groq);
+    localStorage.setItem('openai_api_key', state.keys.openai);
     localStorage.setItem('voice_id', state.settings.voiceId);
     localStorage.setItem('tts_model', state.settings.ttsModel);
     localStorage.setItem('stt_model', state.settings.sttModel);
@@ -1011,25 +1143,34 @@ function runWebSpeechRecognition() {
 async function startRecording() {
   const currentModel = state.settings.aiModel || state.settings.claudeModel || 'gemini-3.6-flash';
   const isGoogle = currentModel.startsWith('gemini-') || currentModel.includes('gemini');
+  const isOpenAI = isOpenAIChatModel(currentModel);
+  const hasOpenAIKey = Boolean(state.keys.openai || state.serverConfig.hasEnvOpenAI);
   const hasLlmKey = isGoogle
     ? Boolean(state.keys.google || state.serverConfig.hasEnvGoogle)
-    : Boolean(state.keys.anthropic || state.serverConfig.hasEnvAnthropic);
+    : isOpenAI
+      ? hasOpenAIKey
+      : Boolean(state.keys.anthropic || state.serverConfig.hasEnvAnthropic);
 
   const isGoogleStt = state.settings.sttModel.startsWith('gemini-') || state.settings.sttModel === 'web_speech';
   const hasGoogleKey = Boolean(state.keys.google || state.serverConfig.hasEnvGoogle);
   const hasElevenKey = Boolean(state.keys.elevenLabs || state.serverConfig.hasEnvElevenLabs);
-  const hasSttKey = state.settings.sttModel === 'web_speech' || (isGoogleStt ? hasGoogleKey : (hasElevenKey || hasGoogleKey));
+  const isGroqStt = isGroqSttModel(state.settings.sttModel);
+  const hasGroqKey = Boolean(state.keys.groq || state.serverConfig.hasEnvGroq);
+  const hasSttKey = state.settings.sttModel === 'web_speech' ||
+    (isGroqStt ? hasGroqKey
+      : isOpenAISttModel(state.settings.sttModel) ? hasOpenAIKey
+        : (isGoogleStt ? hasGoogleKey : (hasElevenKey || hasGoogleKey)));
 
   if (!hasLlmKey) {
     openSettingsPanel();
-    const providerName = isGoogle ? 'Google AI (Gemini)' : 'Anthropic Claude';
+    const providerName = isGoogle ? 'Google AI (Gemini)' : (isOpenAI ? 'OpenAI' : 'Anthropic Claude');
     alert(`Przed rozpoczęciem rozmowy skonfiguruj klucz API dla ${providerName} w panelu ustawień lub w pliku .env.`);
     return;
   }
 
   if (!hasSttKey) {
     openSettingsPanel();
-    alert('Do nagrywania głosu wymagany jest klucz API (Google dla modeli Gemini STT lub ElevenLabs dla Scribe).');
+    alert('Do nagrywania głosu wymagany jest klucz API (Google dla modeli Gemini STT, Groq dla Whisper, OpenAI dla GPT Transcribe lub ElevenLabs dla Scribe).');
     return;
   }
 
@@ -1124,6 +1265,8 @@ async function processRecordedAudio(audioBlob) {
     const sttHeaders = {};
     if (state.keys.elevenLabs) sttHeaders['x-elevenlabs-key'] = state.keys.elevenLabs;
     if (state.keys.google) sttHeaders['x-google-key'] = state.keys.google;
+    if (state.keys.groq) sttHeaders['x-groq-key'] = state.keys.groq;
+    if (state.keys.openai) sttHeaders['x-openai-key'] = state.keys.openai;
 
     const sttRes = await fetch('/api/stt', {
       method: 'POST',
@@ -1177,6 +1320,7 @@ async function handleConversationTurn() {
     const chatHeaders = { 'Content-Type': 'application/json' };
     if (state.keys.anthropic) chatHeaders['x-anthropic-key'] = state.keys.anthropic;
     if (state.keys.google) chatHeaders['x-google-key'] = state.keys.google;
+    if (state.keys.openai) chatHeaders['x-openai-key'] = state.keys.openai;
 
     const payload = {
       messages: state.messages.map(m => ({ role: m.role, content: m.content })),
@@ -1227,12 +1371,13 @@ async function handleConversationTurn() {
     const ttsHeaders = { 'Content-Type': 'application/json' };
     if (state.keys.elevenLabs) ttsHeaders['x-elevenlabs-key'] = state.keys.elevenLabs;
     if (state.keys.google) ttsHeaders['x-google-key'] = state.keys.google;
+    if (state.keys.openai) ttsHeaders['x-openai-key'] = state.keys.openai;
 
     // Upewnij się, że model TTS odpowiada wybranemu głosowi
     let effectiveTtsModel = state.settings.ttsModel;
-    const isElevenVoice = state.settings.voiceId && !state.settings.voiceId.startsWith('google-') && !state.settings.voiceId.startsWith('pl-PL-');
-    if (isElevenVoice && !effectiveTtsModel.startsWith('eleven_')) {
-      effectiveTtsModel = 'eleven_multilingual_v2';
+    const matchingTtsModel = ttsModelForVoice(state.settings.voiceId, effectiveTtsModel);
+    if (matchingTtsModel) {
+      effectiveTtsModel = matchingTtsModel;
       state.settings.ttsModel = effectiveTtsModel;
       localStorage.setItem('tts_model', effectiveTtsModel);
       if (ttsModelSelect) ttsModelSelect.value = effectiveTtsModel;
@@ -1689,9 +1834,9 @@ async function handleReaderSynthesize() {
 
   // Upewnij się, że model TTS odpowiada wybranemu głosowi
   let effectiveTtsModel = state.settings.ttsModel;
-  const isElevenVoice = state.settings.voiceId && !state.settings.voiceId.startsWith('google-') && !state.settings.voiceId.startsWith('pl-PL-');
-  if (isElevenVoice && !effectiveTtsModel.startsWith('eleven_')) {
-    effectiveTtsModel = 'eleven_multilingual_v2';
+  const matchingTtsModel = ttsModelForVoice(state.settings.voiceId, effectiveTtsModel);
+  if (matchingTtsModel) {
+    effectiveTtsModel = matchingTtsModel;
     state.settings.ttsModel = effectiveTtsModel;
     localStorage.setItem('tts_model', effectiveTtsModel);
     if (ttsModelSelect) ttsModelSelect.value = effectiveTtsModel;
@@ -1716,6 +1861,7 @@ async function handleReaderSynthesize() {
     const ttsHeaders = { 'Content-Type': 'application/json' };
     if (state.keys.elevenLabs) ttsHeaders['x-elevenlabs-key'] = state.keys.elevenLabs;
     if (state.keys.google) ttsHeaders['x-google-key'] = state.keys.google;
+    if (state.keys.openai) ttsHeaders['x-openai-key'] = state.keys.openai;
 
     const res = await fetch('/api/tts', {
       method: 'POST',

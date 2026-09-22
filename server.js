@@ -41,6 +41,45 @@ function getGoogleKey(req) {
   return req.headers['x-google-key'] || req.headers['x-gemini-key'] || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
 }
 
+function getGroqKey(req) {
+  return req.headers['x-groq-key'] || process.env.GROQ_API_KEY || '';
+}
+
+function isPlaceholderKey(value) {
+  return !value || value.startsWith('twoj_klucz');
+}
+
+// Akceptujemy zarówno standardową nazwę OPENAI_API_KEY, jak i OPEN_API_KEY z .env
+function getEnvOpenAIKey() {
+  return [process.env.OPENAI_API_KEY, process.env.OPEN_API_KEY].find(k => !isPlaceholderKey(k)) || '';
+}
+
+function getOpenAIKey(req) {
+  return req.headers['x-openai-key'] || getEnvOpenAIKey();
+}
+
+// Głosy OpenAI mają prefiks "openai-", żeby nie mylić ich z identyfikatorami głosów ElevenLabs
+function isOpenAIVoiceId(voiceId) {
+  return Boolean(voiceId && voiceId.startsWith('openai-'));
+}
+
+function isElevenVoiceId(voiceId) {
+  return Boolean(voiceId && !voiceId.startsWith('google-') && !voiceId.startsWith('pl-PL-') && !isOpenAIVoiceId(voiceId));
+}
+
+function isOpenAIChatModel(modelId) {
+  return /^(gpt-|chatgpt-|o\d)/.test(modelId || '');
+}
+
+// Groq udostępnia tylko modele whisper-large-v3(-turbo); whisper-1 to model OpenAI
+function isGroqSttModel(modelId) {
+  return Boolean(modelId && modelId.startsWith('whisper-large'));
+}
+
+function isOpenAISttModel(modelId) {
+  return modelId === 'whisper-1' || Boolean(modelId && modelId.startsWith('gpt-') && modelId.includes('transcribe'));
+}
+
 // Helper: Convert raw 16-bit mono PCM into standard WAV buffer
 function pcmToWavBuffer(pcmBuffer, sampleRate = 24000, numChannels = 1, bitsPerSample = 16) {
   const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
@@ -135,6 +174,135 @@ async function transcribeWithGemini(audioBuffer, mimeType, apiKey, model = 'gemi
   throw lastError || new Error('Błąd transkrypcji mowy Google STT.');
 }
 
+// Helper: Groq Whisper transcription (STT) - OpenAI-compatible endpoint, darmowy plan z limitem dziennym
+async function transcribeWithGroq(audioBuffer, mimeType, filename, apiKey, model = 'whisper-large-v3-turbo', languageCode = 'pl') {
+  const formData = new FormData();
+  formData.append('file', new Blob([audioBuffer], { type: mimeType }), filename);
+  formData.append('model', model);
+  formData.append('response_format', 'json');
+  formData.append('temperature', '0');
+  if (languageCode && languageCode !== 'auto') {
+    formData.append('language', languageCode);
+  }
+
+  const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: formData
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    const error = new Error(errData.error?.message || `Groq STT error (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+
+  const data = await response.json();
+  return data.text || '';
+}
+
+// Helper: OpenAI transcription (STT) - gpt-transcribe, gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper-1
+async function transcribeWithOpenAI(audioBuffer, mimeType, filename, apiKey, model = 'gpt-transcribe', languageCode = 'pl') {
+  async function request(withLanguage) {
+    const formData = new FormData();
+    formData.append('file', new Blob([audioBuffer], { type: mimeType }), filename);
+    formData.append('model', model);
+    formData.append('response_format', 'json');
+    if (withLanguage) {
+      formData.append('language', languageCode);
+    }
+    return fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: formData
+    });
+  }
+
+  const wantsLanguage = Boolean(languageCode && languageCode !== 'auto');
+  let response = await request(wantsLanguage);
+  let errData = null;
+
+  // Nie każdy model transkrypcji przyjmuje parametr "language" - wtedy ponawiamy z autodetekcją
+  if (!response.ok && wantsLanguage && response.status === 400) {
+    errData = await response.json().catch(() => ({}));
+    if (/language/i.test(errData.error?.message || '') || errData.error?.param === 'language') {
+      response = await request(false);
+      errData = null;
+    }
+  }
+
+  if (!response.ok) {
+    errData = errData || await response.json().catch(() => ({}));
+    const error = new Error(errData.error?.message || `OpenAI STT error (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+
+  const data = await response.json();
+  return data.text || '';
+}
+
+// Helper: OpenAI TTS. Endpoint przyjmuje ograniczoną długość tekstu, więc dłuższy tekst dzielimy
+// po zdaniach i sklejamy wynikowe pliki MP3 (ramki MP3 można bezpiecznie łączyć).
+const OPENAI_TTS_MAX_CHARS = 4000;
+const OPENAI_TTS_LEGACY_UNSUPPORTED_VOICES = ['ballad', 'verse', 'marin', 'cedar'];
+
+function splitTextForTts(text, maxChars) {
+  if (text.length <= maxChars) return [text];
+  const sentences = text.match(/[^.!?…\n]+[.!?…]*\s*/g) || [text];
+  const parts = [];
+  let current = '';
+  for (const sentence of sentences) {
+    if (current && (current + sentence).length > maxChars) {
+      parts.push(current.trim());
+      current = '';
+    }
+    // Pojedyncze zdanie dłuższe niż limit tniemy na sztywno
+    let rest = sentence;
+    while (rest.length > maxChars) {
+      parts.push(rest.slice(0, maxChars).trim());
+      rest = rest.slice(maxChars);
+    }
+    current += rest;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+async function synthesizeWithOpenAI(text, voiceId, modelId, apiKey) {
+  const voice = voiceId.replace(/^openai-/, '');
+  // tts-1 / tts-1-hd nie obsługują nowszych głosów - wtedy używamy gpt-4o-mini-tts
+  const model = modelId.startsWith('tts-1') && OPENAI_TTS_LEGACY_UNSUPPORTED_VOICES.includes(voice)
+    ? 'gpt-4o-mini-tts'
+    : modelId;
+
+  const buffers = [];
+  for (const part of splitTextForTts(text, OPENAI_TTS_MAX_CHARS)) {
+    const body = { model, voice, input: part, response_format: 'mp3' };
+    if (model.startsWith('gpt-')) {
+      body.instructions = 'Mów po polsku naturalnie, płynnie i wyraźnie, z naturalną intonacją lektora.';
+    }
+
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error?.message || `OpenAI TTS error (${response.status})`);
+    }
+    buffers.push(Buffer.from(await response.arrayBuffer()));
+  }
+
+  return { audioBuffer: Buffer.concat(buffers), model };
+}
+
 // ----------------------------------------------------
 // 1. GET /api/status - Check configuration status
 // ----------------------------------------------------
@@ -145,12 +313,16 @@ app.get('/api/status', (req) => {
     (process.env.GOOGLE_API_KEY && process.env.GOOGLE_API_KEY !== 'twoj_klucz_google') ||
     (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'twoj_klucz_gemini')
   );
+  const hasEnvGroq = Boolean(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'twoj_klucz_groq');
+  const hasEnvOpenAI = Boolean(getEnvOpenAIKey());
 
   req.res.json({
     status: 'ok',
     hasEnvElevenLabs,
     hasEnvAnthropic,
     hasEnvGoogle,
+    hasEnvGroq,
+    hasEnvOpenAI,
     defaults: {
       voiceId: process.env.VOICE_ID || process.env.ELEVENLABS_VOICE_ID || 'google-gemini-neural',
       ttsModel: process.env.TTS_MODEL || process.env.ELEVENLABS_TTS_MODEL || 'gemini-2.5-flash-preview-tts',
@@ -177,6 +349,13 @@ const defaultClaudeModels = [
   { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5 (Lekki & szybki)', provider: 'anthropic' },
   { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'anthropic' },
   { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', provider: 'anthropic' }
+];
+
+const defaultOpenAIModels = [
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna (Szybki & tani)', provider: 'openai' },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra (Zbalansowany)', provider: 'openai' },
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol (Flagowy)', provider: 'openai' },
+  { id: 'gpt-6-astra', name: 'GPT-6 Astra (Najpotężniejszy OpenAI)', provider: 'openai' }
 ];
 
 async function getAvailableModels(req) {
@@ -237,10 +416,33 @@ async function getAvailableModels(req) {
     }
   }
 
+  // Lista /v1/models OpenAI zawiera setki pozycji (snapshoty, audio, obrazy), więc tylko
+  // zawężamy wyselekcjonowaną listę do modeli, do których klucz faktycznie ma dostęp
+  let openaiModels = [...defaultOpenAIModels];
+  const openaiKey = getOpenAIKey(req);
+  if (openaiKey) {
+    try {
+      const resp = await fetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${openaiKey}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const availableIds = new Set((data.data || []).map(m => m.id));
+        const available = defaultOpenAIModels.filter(m => availableIds.has(m.id));
+        if (available.length > 0) {
+          openaiModels = available;
+        }
+      }
+    } catch (err) {
+      console.warn('Could not query OpenAI models list:', err.message);
+    }
+  }
+
   return {
     googleModels,
     claudeModels,
-    models: [...googleModels, ...claudeModels]
+    openaiModels,
+    models: [...googleModels, ...claudeModels, ...openaiModels]
   };
 }
 
@@ -273,10 +475,27 @@ const defaultElevenVoices = [
   { voice_id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam (Głęboki, lektorski - ElevenLabs)', category: 'premade' }
 ];
 
+// Wbudowane głosy OpenAI TTS (ballad, verse, marin i cedar działają tylko z gpt-4o-mini-tts)
+const openaiVoices = [
+  { voice_id: 'openai-marin', name: 'Marin (Naturalny, najnowszy - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-cedar', name: 'Cedar (Naturalny, najnowszy - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-alloy', name: 'Alloy (Neutralny - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-ash', name: 'Ash (Męski - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-ballad', name: 'Ballad (Męski, ciepły - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-coral', name: 'Coral (Kobiecy - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-echo', name: 'Echo (Męski - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-fable', name: 'Fable (Narracyjny - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-nova', name: 'Nova (Kobiecy, energiczny - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-onyx', name: 'Onyx (Męski, głęboki - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-sage', name: 'Sage (Kobiecy, spokojny - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-shimmer', name: 'Shimmer (Kobiecy, jasny - OpenAI)', category: 'openai' },
+  { voice_id: 'openai-verse', name: 'Verse (Męski, ekspresyjny - OpenAI)', category: 'openai' }
+];
+
 app.get('/api/voices', async (req, res) => {
   const apiKey = getElevenLabsKey(req);
   if (!apiKey) {
-    return res.json({ voices: [...stsVoices, ...defaultElevenVoices] });
+    return res.json({ voices: [...stsVoices, ...openaiVoices, ...defaultElevenVoices] });
   }
 
   try {
@@ -285,7 +504,7 @@ app.get('/api/voices', async (req, res) => {
     });
 
     if (!response.ok) {
-      return res.json({ voices: [...stsVoices, ...defaultElevenVoices] });
+      return res.json({ voices: [...stsVoices, ...openaiVoices, ...defaultElevenVoices] });
     }
 
     const data = await response.json();
@@ -295,14 +514,14 @@ app.get('/api/voices', async (req, res) => {
       category: v.category || 'custom'
     }));
 
-    res.json({ voices: [...stsVoices, ...elevenVoices] });
+    res.json({ voices: [...stsVoices, ...openaiVoices, ...elevenVoices] });
   } catch (error) {
-    res.json({ voices: [...stsVoices, ...defaultElevenVoices] });
+    res.json({ voices: [...stsVoices, ...openaiVoices, ...defaultElevenVoices] });
   }
 });
 
 // ----------------------------------------------------
-// 4. POST /api/stt - Speech-to-Text (Google Gemini & ElevenLabs) with Timing
+// 4. POST /api/stt - Speech-to-Text (Google Gemini, Groq Whisper & ElevenLabs) with Timing
 // ----------------------------------------------------
 app.post('/api/stt', upload.single('audio'), async (req, res) => {
   const startTime = Date.now();
@@ -353,7 +572,85 @@ app.post('/api/stt', upload.single('audio'), async (req, res) => {
     }
   }
 
-  // 4B. ElevenLabs STT (Scribe) z automatycznym fallbackiem do Google Gemini
+  // 4B. Groq Whisper STT (Modele: whisper-large-v3-turbo, whisper-large-v3)
+  if (isGroqSttModel(modelId)) {
+    const groqKey = getGroqKey(req);
+    if (!groqKey) {
+      return res.status(400).json({
+        error: 'Brak klucza Groq API. Ustaw GROQ_API_KEY w .env lub w ustawieniach aplikacji.'
+      });
+    }
+
+    try {
+      const text = await transcribeWithGroq(
+        req.file.buffer,
+        req.file.mimetype || 'audio/webm',
+        req.file.originalname || 'recording.webm',
+        groqKey,
+        modelId,
+        languageCode
+      );
+
+      const durationMs = Date.now() - startTime;
+      const durationSec = +(durationMs / 1000).toFixed(2);
+      res.set('X-Duration-Ms', String(durationMs));
+      res.set('X-Duration-Sec', String(durationSec));
+      console.log(`⏱️ [STT] Groq ${modelId} zakończono w ${durationMs}ms (${durationSec}s)`);
+
+      return res.json({
+        text: text.trim(),
+        model: modelId,
+        provider: 'groq',
+        language_code: languageCode,
+        duration_ms: durationMs,
+        duration_sec: durationSec
+      });
+    } catch (err) {
+      console.error('Error during Groq STT:', err);
+      return res.status(err.status || 500).json({ error: err.message || 'Błąd transkrypcji Groq STT.' });
+    }
+  }
+
+  // 4C. OpenAI STT (Modele: gpt-transcribe, gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper-1)
+  if (isOpenAISttModel(modelId)) {
+    const openaiKey = getOpenAIKey(req);
+    if (!openaiKey) {
+      return res.status(400).json({
+        error: 'Brak klucza OpenAI API. Ustaw OPENAI_API_KEY (lub OPEN_API_KEY) w .env albo w ustawieniach aplikacji.'
+      });
+    }
+
+    try {
+      const text = await transcribeWithOpenAI(
+        req.file.buffer,
+        req.file.mimetype || 'audio/webm',
+        req.file.originalname || 'recording.webm',
+        openaiKey,
+        modelId,
+        languageCode
+      );
+
+      const durationMs = Date.now() - startTime;
+      const durationSec = +(durationMs / 1000).toFixed(2);
+      res.set('X-Duration-Ms', String(durationMs));
+      res.set('X-Duration-Sec', String(durationSec));
+      console.log(`⏱️ [STT] OpenAI ${modelId} zakończono w ${durationMs}ms (${durationSec}s)`);
+
+      return res.json({
+        text: text.trim(),
+        model: modelId,
+        provider: 'openai',
+        language_code: languageCode,
+        duration_ms: durationMs,
+        duration_sec: durationSec
+      });
+    } catch (err) {
+      console.error('Error during OpenAI STT:', err);
+      return res.status(err.status || 500).json({ error: err.message || 'Błąd transkrypcji OpenAI STT.' });
+    }
+  }
+
+  // 4D. ElevenLabs STT (Scribe) z automatycznym fallbackiem do Google Gemini
   const apiKey = getElevenLabsKey(req);
   if (!apiKey) {
     const googleKey = getGoogleKey(req);
@@ -553,7 +850,102 @@ app.post('/api/chat', async (req, res) => {
   }
 
   // ==========================================
-  // 5B. Anthropic Claude Execution
+  // 5B. OpenAI GPT Execution
+  // ==========================================
+  if (isOpenAIChatModel(selectedModel)) {
+    const openaiKey = getOpenAIKey(req);
+    if (!openaiKey) {
+      return res.status(400).json({
+        error: 'Brak klucza OpenAI API. Ustaw OPENAI_API_KEY (lub OPEN_API_KEY) w pliku .env lub w ustawieniach aplikacji.'
+      });
+    }
+
+    const formattedMessages = messages
+      .filter(m => m.content && String(m.content).trim().length > 0)
+      .map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: String(m.content).trim()
+      }));
+
+    if (formattedMessages.length === 0) {
+      return res.status(400).json({ error: 'Brak treści wiadomości do przetworzenia.' });
+    }
+
+    const modelsToTry = [...new Set([selectedModel, ...defaultOpenAIModels.map(m => m.id)])];
+
+    let lastError = null;
+    for (const currentModel of modelsToTry) {
+      // Modele rozumujące (GPT-5+, seria o) nie przyjmują temperature, a limit tokenów
+      // obejmuje też rozumowanie - stąd niski reasoning_effort i większy zapas tokenów
+      const isReasoningModel = /^(gpt-5|gpt-6|o\d)/.test(currentModel);
+      const payload = {
+        model: currentModel,
+        messages: [
+          { role: 'system', content: systemPrompt || defaultSystemPrompt },
+          ...formattedMessages
+        ],
+        ...(isReasoningModel
+          ? { reasoning_effort: 'low', max_completion_tokens: 4000 }
+          : { temperature: 0.7, max_completion_tokens: 600 })
+      };
+
+      try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${openaiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (response.ok) {
+          const replyText = (data.choices?.[0]?.message?.content || '').trim();
+          const durationMs = Date.now() - startTime;
+          const durationSec = +(durationMs / 1000).toFixed(2);
+          res.set('X-Duration-Ms', String(durationMs));
+          res.set('X-Duration-Sec', String(durationSec));
+          console.log(`⏱️ [LLM] OpenAI ${currentModel} zakończono w ${durationMs}ms (${durationSec}s)`);
+
+          if (currentModel !== selectedModel) {
+            console.log(`ℹ️ OpenAI model fallback: użyto "${currentModel}" zamiast "${selectedModel}".`);
+          }
+
+          return res.json({
+            text: replyText,
+            model: data.model || currentModel,
+            provider: 'openai',
+            fallbackUsed: currentModel !== selectedModel,
+            originalModelRequested: selectedModel,
+            usage: data.usage,
+            duration_ms: durationMs,
+            duration_sec: durationSec
+          });
+        }
+
+        const message = data.error?.message || `OpenAI (${response.status})`;
+        lastError = Object.assign(new Error(message), { status: response.status });
+
+        // Przechodzimy do kolejnego modelu tylko, gdy ten nie istnieje / jest niedostępny dla klucza
+        const isModelUnavailable = response.status === 404 || data.error?.code === 'model_not_found';
+        if (!isModelUnavailable) break;
+        console.warn(`⚠️ OpenAI model "${currentModel}" niedostępny. Próbuję alternatywny model...`);
+      } catch (err) {
+        lastError = err;
+        break;
+      }
+    }
+
+    console.error('OpenAI API error:', lastError);
+    return res.status(lastError?.status || 502).json({
+      error: `Błąd podczas komunikacji z OpenAI: ${lastError?.message || 'Nieznany błąd'}`
+    });
+  }
+
+  // ==========================================
+  // 5C. Anthropic Claude Execution
   // ==========================================
   const apiKey = getAnthropicKey(req);
   if (!apiKey) {
@@ -652,10 +1044,12 @@ app.post('/api/tts', async (req, res) => {
   const cleanText = text.trim();
 
   // Rozpoznanie intencji dostawcy na podstawie głosu i modelu
+  const isOpenAIRequested = isOpenAIVoiceId(voiceId);
+
   const isElevenRequested = Boolean(
-    (voiceId && !voiceId.startsWith('google-') && !voiceId.startsWith('pl-PL-')) ||
+    isElevenVoiceId(voiceId) ||
     (modelId && modelId.startsWith('eleven_'))
-  );
+  ) && !isOpenAIRequested;
 
   const isWaveNetRequested = Boolean(
     (voiceId && voiceId.startsWith('pl-PL-Wavenet')) ||
@@ -698,12 +1092,30 @@ app.post('/api/tts', async (req, res) => {
     return res.send(audioBuffer);
   }
 
+  // 0. OpenAI TTS (gpt-4o-mini-tts, tts-1-hd, tts-1) z fallbackiem do Edge Neural
+  if (isOpenAIRequested) {
+    const openaiKey = getOpenAIKey(req);
+    if (openaiKey) {
+      try {
+        const openaiModelId = (modelId && (modelId.startsWith('gpt-') || modelId.startsWith('tts-'))) ? modelId : 'gpt-4o-mini-tts';
+        const { audioBuffer, model } = await synthesizeWithOpenAI(cleanText, targetVoiceId, openaiModelId, openaiKey);
+        return finalizeAudioResponse(audioBuffer, 'audio/mpeg', `OpenAI (${model})`);
+      } catch (err) {
+        console.warn('OpenAI TTS błąd:', err.message);
+        ttsFallbackReason = `OpenAI: ${err.message}`;
+      }
+    } else {
+      console.warn('Wybrano głos OpenAI, ale brak klucza API (OPENAI_API_KEY / OPEN_API_KEY). Fallback do Edge Neural...');
+      ttsFallbackReason = 'Brak klucza API OpenAI.';
+    }
+  }
+
   // 1. ElevenLabs TTS (Priorytet, gdy wybrano głos lub model ElevenLabs)
-  if (isElevenRequested || (targetVoiceId && !targetVoiceId.startsWith('google-') && !targetVoiceId.startsWith('pl-PL-')) || (targetModelId && targetModelId.startsWith('eleven_'))) {
+  if (!isOpenAIRequested && (isElevenRequested || isElevenVoiceId(targetVoiceId) || (targetModelId && targetModelId.startsWith('eleven_')))) {
     const apiKey = getElevenLabsKey(req);
     if (apiKey) {
       try {
-        const elevenVoiceId = (targetVoiceId && !targetVoiceId.startsWith('google-') && !targetVoiceId.startsWith('pl-PL-'))
+        const elevenVoiceId = isElevenVoiceId(targetVoiceId)
           ? targetVoiceId
           : (process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL');
         const elevenModelId = (targetModelId && targetModelId.startsWith('eleven_'))
@@ -763,7 +1175,7 @@ app.post('/api/tts', async (req, res) => {
   }
 
   // 2. Google Gemini TTS
-  if (isGeminiRequested || targetVoiceId === 'google-gemini-neural' || (targetModelId && targetModelId.includes('gemini'))) {
+  if (!isOpenAIRequested && (isGeminiRequested || targetVoiceId === 'google-gemini-neural' || (targetModelId && targetModelId.includes('gemini')))) {
     const googleKey = getGoogleKey(req);
     if (googleKey) {
       try {
@@ -846,7 +1258,8 @@ app.post('/api/tts', async (req, res) => {
 
   // 5. Ostateczny fallback: Edge Neural (dopasowany płcią do wybranego głosu)
   try {
-    const isFemaleVoice = targetVoiceId === 'EXAVITQu4vr4xnSDxMaL' || targetVoiceId === 'pl-PL-ZofiaNeural';
+    const femaleVoiceIds = ['EXAVITQu4vr4xnSDxMaL', 'pl-PL-ZofiaNeural', 'openai-marin', 'openai-coral', 'openai-nova', 'openai-sage', 'openai-shimmer'];
+    const isFemaleVoice = femaleVoiceIds.includes(targetVoiceId);
     const fallbackEdgeVoice = isFemaleVoice ? 'pl-PL-ZofiaNeural' : 'pl-PL-MarekNeural';
     const fallbackLabel = fallbackEdgeVoice === 'pl-PL-ZofiaNeural' ? 'Zofia' : 'Marek';
     const audioBuffer = await synthesizeWithEdge(cleanText, fallbackEdgeVoice);
@@ -860,7 +1273,7 @@ app.post('/api/tts', async (req, res) => {
 // Start server
 app.listen(port, () => {
   console.log(`\n🚀 Serwer uruchomiony: http://localhost:${port}`);
-  console.log(`🎙️  STT: Google Gemini Transcribe / Web Speech / ElevenLabs Scribe`);
-  console.log(`🧠 LLM: Google Gemini & Anthropic Claude`);
-  console.log(`🔊 TTS: Google Gemini Voice / WaveNet / Edge Neural / ElevenLabs\n`);
+  console.log(`🎙️  STT: Google Gemini Transcribe / Web Speech / Groq Whisper / OpenAI Transcribe / ElevenLabs Scribe`);
+  console.log(`🧠 LLM: Google Gemini, Anthropic Claude & OpenAI GPT`);
+  console.log(`🔊 TTS: Google Gemini Voice / WaveNet / Edge Neural / OpenAI / ElevenLabs\n`);
 });
