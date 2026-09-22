@@ -2,37 +2,52 @@
 <html lang="pl">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Echo – lektor</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <header class="head">
-    <div class="brand">Echo <span>lektor</span></div>
-    <div class="server-dot" id="serverDot" title="Stan serwera"></div>
+    <div class="brand" aria-label="Echo"><svg aria-hidden="true" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13v6m6-11v16m5-21v26m5-21v16m6-11v6"/></svg>echo<span>.</span></div>
+    <div class="connection"><span class="server-dot" id="serverDot" title="Stan serwera"></span><span class="connection-label">Łączenie</span></div>
   </header>
 
-  <section class="status" id="statusBox">
-    <div class="status-line">
-      <span class="status-label" id="statusLabel">Gotowy</span>
-      <span class="status-progress" id="statusProgress"></span>
+  <main>
+    <div class="intro">
+      <p class="eyebrow">TWOJE MAŁE STUDIO LEKTORSKIE</p>
+      <h1>Daj oczom odpocząć.<br><span>Posłuchaj tekstu.</span></h1>
     </div>
-    <div class="bar"><div class="bar-fill" id="barFill"></div></div>
-    <p class="status-preview" id="statusPreview">Zaznacz tekst na stronie i kliknij „Przeczytaj”, użyj menu pod prawym przyciskiem albo skrótu <kbd id="shortcutHint">Alt+Shift+R</kbd>.</p>
-  </section>
 
-  <div class="controls">
-    <button class="btn primary" id="readBtn" type="button">Przeczytaj zaznaczenie</button>
-    <button class="btn" id="pauseBtn" type="button" disabled>Pauza</button>
-    <button class="btn" id="stopBtn" type="button" disabled>Stop</button>
-  </div>
+    <section class="status" id="statusBox" aria-label="Odtwarzacz">
+      <div class="status-line" role="status">
+        <span class="status-label" id="statusLabel">Gotowy</span>
+        <span class="status-progress" id="statusProgress"></span>
+      </div>
+      <div class="sound-art" aria-hidden="true">
+        <div class="orbit orbit-outer"></div><div class="orbit orbit-inner"></div>
+        <div class="sound-core"><svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="M12 27v10m10-18v26m10-34v42m10-34v26m10-18v10"/></svg></div>
+      </div>
+      <p class="status-preview" id="statusPreview">Zaznacz tekst na dowolnej stronie.<br>Resztę przeczyta Ci Echo.</p>
+      <div class="bar" aria-hidden="true"><div class="bar-fill" id="barFill"></div></div>
+      <div class="controls">
+        <button class="btn primary" id="readBtn" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5a1 1 0 0 1 1.5-.86l10 6.5a1 1 0 0 1 0 1.72l-10 6.5A1 1 0 0 1 8 18.5z"/></svg>Przeczytaj zaznaczenie</button>
+        <div class="transport">
+          <button class="btn secondary pause" id="pauseBtn" type="button" disabled>Pauza</button>
+          <span class="transport-divider" aria-hidden="true"></span>
+          <button class="btn secondary stop" id="stopBtn" type="button" disabled>Stop</button>
+        </div>
+      </div>
+    </section>
 
-  <section class="settings">
+  <section class="settings" aria-label="Ustawienia głosu">
+    <div class="section-heading"><h2>Twój głos</h2><span>Dopasuj do siebie</span></div>
     <label class="field">
       <span>Głos</span>
       <select id="voiceSelect"></select>
     </label>
+    <div class="settings-row">
     <label class="field">
-      <span>Silnik TTS</span>
+      <span>Silnik głosu</span>
       <select id="modelSelect"></select>
     </label>
     <label class="field">
@@ -46,8 +61,11 @@
       </select>
     </label>
 
+    </div>
+
     <details class="advanced">
-      <summary>Serwer i klucze API</summary>
+      <summary><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>Połączenie i klucze API<span class="chevron" aria-hidden="true">⌄</span></summary>
+      <div class="advanced-fields">
       <label class="field">
         <span>Adres serwera Echo</span>
         <input id="serverInput" type="url" placeholder="http://localhost:3000" spellcheck="false">
@@ -64,10 +82,14 @@
         <span>Klucz OpenAI <em>(opcjonalny)</em></span>
         <input id="openaiKeyInput" type="password" autocomplete="off" spellcheck="false">
       </label>
-      <p class="hint">Klucze są potrzebne tylko wtedy, gdy nie ma ich w pliku <code>.env</code> serwera.</p>
-      <button class="btn small" id="saveServerBtn" type="button">Zapisz</button>
+      <p class="hint">Uzupełnij klucze tylko wtedy, gdy nie są już skonfigurowane na serwerze Echo.</p>
+      <button class="btn small" id="saveServerBtn" type="button">Zapisz ustawienia</button>
+      </div>
     </details>
   </section>
+
+  </main>
+  <footer title="Możesz też wybrać Echo w menu pod prawym przyciskiem myszy.">Zaznacz tekst i użyj <kbd id="shortcutHint">Alt+Shift+R</kbd></footer>
 
   <script type="module" src="popup.js"></script>
 </body>

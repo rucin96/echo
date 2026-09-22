@@ -182,5 +182,6 @@ function renderState(state) {
 
   pauseBtn.disabled = !(status === 'playing' || status === 'paused');
   pauseBtn.textContent = status === 'paused' ? 'Wznów' : 'Pauza';
+  pauseBtn.dataset.paused = String(status === 'paused');
   stopBtn.disabled = !active;
 }
