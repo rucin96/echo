@@ -1,8 +1,9 @@
-import { splitIntoChunks } from './chunker.js';
+import { splitIntoChunks, splitIntoSentenceChunks } from './chunker.js';
 import { normalizeServerUrl } from './shared.js';
 
 const audio = new Audio();
 let session = null;
+let loadingTicker = null;
 
 chrome.runtime.onMessage.addListener(msg => {
   if (msg?.target !== 'offscreen') return;
@@ -37,7 +38,7 @@ chrome.runtime.onMessage.addListener(msg => {
 async function start(text, settings) {
   stop();
 
-  const chunks = splitIntoChunks(text);
+  const chunks = settings.sentenceMode ? splitIntoSentenceChunks(text) : splitIntoChunks(text);
   if (!chunks.length) {
     report({ status: 'error', error: 'Brak tekstu do przeczytania.' });
     return;
@@ -50,21 +51,24 @@ async function start(text, settings) {
     cancelled: false,
     controller: new AbortController(),
     audioUrls: new Map(), // index -> Promise<objectURL>
+    ready: new Set(), // indeksy, których audio już przyszło
+    nextFetch: 0,
+    inFlight: 0,
+    ...fetchPolicy(settings),
     finishPlayback: null,
-    preview: text.trim().slice(0, 120)
+    preview: text.trim().slice(0, 120),
+    loadingSince: null
   };
   session = s;
 
   try {
     for (let i = 0; i < chunks.length; i++) {
       s.index = i;
-      if (!s.audioUrls.has(i)) report({ status: 'loading' });
+      pump(s);
+      if (!s.ready.has(i)) report({ status: 'loading' });
 
-      const url = await synthesize(s, i);
+      const url = await s.audioUrls.get(i);
       if (s.cancelled) return;
-
-      // Pobieramy kolejny fragment, zanim skończy się bieżący, żeby nie było przerwy
-      if (i + 1 < chunks.length) synthesize(s, i + 1).catch(() => {});
 
       report({ status: 'playing' });
       await play(s, url);
@@ -81,11 +85,26 @@ async function start(text, settings) {
   }
 }
 
-function synthesize(s, index) {
-  if (!s.audioUrls.has(index)) {
-    s.audioUrls.set(index, fetchAudio(s, s.chunks[index]));
+// Ile fragmentów generować z wyprzedzeniem i ile zapytań naraz.
+// Tryb zdań wysyła kolejne zdania od razu, nie czekając na odtworzenie, zawsze w kolejności
+// (bieżące, następne, reszta). Lokalny Chatterbox liczy po jednym, więc trzymamy tylko jedno
+// zdanie w kolejce za generowanym, żeby serwer nie pomieszał kolejności; chmurę ograniczamy do 3.
+function fetchPolicy(settings) {
+  if (!settings.sentenceMode) return { lookahead: 1, concurrency: 2 };
+  return { lookahead: Infinity, concurrency: settings.voiceId?.startsWith('local-') ? 2 : 3 };
+}
+
+// Uruchamia zapytania TTS w kolejności fragmentów, aż do wyczerpania limitów
+function pump(s) {
+  while (!s.cancelled && s.nextFetch < s.chunks.length && s.inFlight < s.concurrency && s.nextFetch <= s.index + s.lookahead) {
+    const index = s.nextFetch++;
+    s.inFlight++;
+    const pending = fetchAudio(s, s.chunks[index]);
+    s.audioUrls.set(index, pending);
+    pending
+      .then(() => s.ready.add(index), () => {})
+      .finally(() => { s.inFlight--; pump(s); });
   }
-  return s.audioUrls.get(index);
 }
 
 async function fetchAudio(s, text) {
@@ -154,5 +173,17 @@ function report(partial) {
     error: null,
     ...partial
   };
+
+  // Lokalny model potrafi generować fragment ponad minutę, więc co sekundę odświeżamy licznik
+  if (state.status === 'loading') {
+    if (s && !s.loadingSince) s.loadingSince = Date.now();
+    state.loadingSince = s?.loadingSince || Date.now();
+    loadingTicker ??= setInterval(() => report({ status: 'loading' }), 1000);
+  } else {
+    if (s) s.loadingSince = null;
+    clearInterval(loadingTicker);
+    loadingTicker = null;
+  }
+
   chrome.runtime.sendMessage({ target: 'background', type: 'state', state }).catch(() => {});
 }

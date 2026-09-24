@@ -4,6 +4,7 @@ const $ = id => document.getElementById(id);
 const voiceSelect = $('voiceSelect');
 const modelSelect = $('modelSelect');
 const speedSelect = $('speedSelect');
+const sentenceModeInput = $('sentenceModeInput');
 const serverInput = $('serverInput');
 const elevenKeyInput = $('elevenKeyInput');
 const googleKeyInput = $('googleKeyInput');
@@ -35,6 +36,7 @@ async function init() {
   googleKeyInput.value = keys.googleKey;
   openaiKeyInput.value = keys.openaiKey;
   speedSelect.value = String(settings.speed);
+  sentenceModeInput.checked = settings.sentenceMode;
 
   showShortcut();
   await loadVoices();
@@ -123,6 +125,12 @@ speedSelect.addEventListener('change', () => {
   sendToBackground({ type: 'set-speed', speed: settings.speed });
 });
 
+// Dotyczy kolejnego czytania; bieżące kończy się w dotychczasowym trybie
+sentenceModeInput.addEventListener('change', () => {
+  settings.sentenceMode = sentenceModeInput.checked;
+  chrome.storage.sync.set({ sentenceMode: settings.sentenceMode });
+});
+
 $('saveServerBtn').addEventListener('click', async () => {
   const serverUrl = normalizeServerUrl(serverInput.value);
 
@@ -169,9 +177,12 @@ function renderState(state) {
   const active = status === 'loading' || status === 'playing' || status === 'paused';
 
   $('statusBox').classList.toggle('error', status === 'error');
-  $('statusLabel').textContent = STATUS_LABELS[status] || status;
+  $('statusBox').dataset.status = status;
+  const elapsed = status === 'loading' && state.loadingSince ? Math.floor((Date.now() - state.loadingSince) / 1000) : 0;
+  $('statusLabel').textContent = `${STATUS_LABELS[status] || status}${elapsed >= 1 ? ` ${elapsed} s` : ''}`;
   $('statusProgress').textContent = active && total ? `fragment ${index + 1} / ${total}` : '';
-  $('barFill').style.width = active && total ? `${((index + (status === 'loading' ? 0 : 0.5)) / total) * 100}%` : '0';
+  // Podczas generowania pasek jest nieokreślony (animacja w CSS)
+  $('barFill').style.width = status === 'loading' ? '' : active && total ? `${((index + 0.5) / total) * 100}%` : '0';
 
   if (status === 'error') {
     $('statusPreview').textContent = error;

@@ -4,7 +4,8 @@ export const DEFAULT_SETTINGS = {
   serverUrl: 'http://localhost:3000',
   voiceId: 'google-gemini-neural',
   ttsModel: 'gemini-2.5-flash-preview-tts',
-  speed: 1
+  speed: 1,
+  sentenceMode: false
 };
 
 export const DEFAULT_KEYS = {

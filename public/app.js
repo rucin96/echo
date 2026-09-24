@@ -103,7 +103,9 @@ const state = {
     sttModel: initialSttModel,
     aiModel: initialModel,
     claudeModel: initialModel,
-    systemPrompt: localStorage.getItem('system_prompt') || ''
+    systemPrompt: localStorage.getItem('system_prompt') || '',
+    sentenceMode: localStorage.getItem('tts_sentence_mode') === 'true',
+    mergeSentences: localStorage.getItem('tts_merge_sentences') !== 'false'
   },
   serverConfig: {
     hasEnvElevenLabs: false,
@@ -128,6 +130,8 @@ const clearChatBtn = document.getElementById('clearChatBtn');
 const keysStatusBadge = document.getElementById('keysStatusBadge');
 const keysStatusText = document.getElementById('keysStatusText');
 const ttsAudioPlayer = document.getElementById('ttsAudioPlayer');
+const sentenceModeToggle = document.getElementById('sentenceModeToggle');
+const mergeSentencesToggle = document.getElementById('mergeSentencesToggle');
 
 // Reader View Elements
 const navChatBtn = document.getElementById('navChatBtn');
@@ -599,6 +603,14 @@ function loadSavedSettings() {
   if (sttModelSelect) sttModelSelect.value = state.settings.sttModel;
   if (claudeModelSelect) claudeModelSelect.value = state.settings.aiModel || state.settings.claudeModel;
   if (systemPromptInput) systemPromptInput.value = state.settings.systemPrompt;
+  if (sentenceModeToggle) sentenceModeToggle.checked = state.settings.sentenceMode;
+  if (mergeSentencesToggle) mergeSentencesToggle.checked = state.settings.mergeSentences;
+  syncSentenceOptions();
+}
+
+// Sklejanie ma sens tylko w trybie zdań
+function syncSentenceOptions() {
+  if (mergeSentencesToggle && sentenceModeToggle) mergeSentencesToggle.disabled = !sentenceModeToggle.checked;
 }
 
 // Check server .env status
@@ -969,6 +981,8 @@ function setupEventListeners() {
     state.settings.aiModel = claudeModelSelect.value;
     state.settings.claudeModel = claudeModelSelect.value;
     state.settings.systemPrompt = systemPromptInput.value.trim();
+    if (sentenceModeToggle) state.settings.sentenceMode = sentenceModeToggle.checked;
+    if (mergeSentencesToggle) state.settings.mergeSentences = mergeSentencesToggle.checked;
 
     localStorage.setItem('elevenlabs_api_key', state.keys.elevenLabs);
     localStorage.setItem('anthropic_api_key', state.keys.anthropic);
@@ -981,6 +995,8 @@ function setupEventListeners() {
     localStorage.setItem('ai_model', state.settings.aiModel);
     localStorage.setItem('claude_model', state.settings.claudeModel);
     localStorage.setItem('system_prompt', state.settings.systemPrompt);
+    localStorage.setItem('tts_sentence_mode', String(state.settings.sentenceMode));
+    localStorage.setItem('tts_merge_sentences', String(state.settings.mergeSentences));
 
     updateApiStatusBadge();
     updateDynamicLabels();
@@ -1001,6 +1017,8 @@ function setupEventListeners() {
   ttsModelSelect.addEventListener('change', () => {
     syncVoiceAndTtsModel('model');
   });
+
+  if (sentenceModeToggle) sentenceModeToggle.addEventListener('change', syncSentenceOptions);
 
   // Password visibility toggle
   document.querySelectorAll('.toggle-password').forEach(btn => {
@@ -1033,7 +1051,11 @@ function setupEventListeners() {
   });
 
   ttsAudioPlayer.addEventListener('ended', () => {
-    const playDur = ttsAudioPlayer.duration || ((performance.now() - pipelineTracker.stepStart) / 1000);
+    // W trybie zdań "ended" przychodzi po każdym zdaniu; turę kończy dopiero ostatnie
+    if (chatSentenceSession && !chatSentenceSession.playingLast) return;
+    const playDur = chatSentenceSession
+      ? (performance.now() - pipelineTracker.stepStart) / 1000
+      : ttsAudioPlayer.duration || ((performance.now() - pipelineTracker.stepStart) / 1000);
     pipelineTracker.finishStep('play', playDur);
     pipelineTracker.completeTurn();
 
@@ -1425,6 +1447,11 @@ async function handleConversationTurn() {
       if (ttsModelSelect) ttsModelSelect.value = effectiveTtsModel;
     }
 
+    if (state.settings.sentenceMode) {
+      await speakChatInSentences(aiText, ttsHeaders, effectiveTtsModel, getAiModelName(chatData.model || selectedModel));
+      return;
+    }
+
     const ttsRes = await fetch('/api/tts', {
       method: 'POST',
       headers: ttsHeaders,
@@ -1481,12 +1508,7 @@ function initAudioContext() {
   }
 }
 
-function playAudio(audioUrl) {
-  initAudioContext();
-  pipelineTracker.startStep('play');
-
-  ttsAudioPlayer.src = audioUrl;
-
+function attachTtsAnalyser() {
   if (!ttsSource) {
     ttsSource = audioContext.createMediaElementSource(ttsAudioPlayer);
     ttsAnalyser = audioContext.createAnalyser();
@@ -1495,6 +1517,15 @@ function playAudio(audioUrl) {
     ttsSource.connect(ttsAnalyser);
     ttsAnalyser.connect(audioContext.destination);
   }
+}
+
+function playAudio(audioUrl) {
+  cancelChatSentences();
+  initAudioContext();
+  pipelineTracker.startStep('play');
+
+  ttsAudioPlayer.src = audioUrl;
+  attachTtsAnalyser();
 
   const voiceName = getVoiceName(state.settings.voiceId);
   setStatus('speaking', `🔊 <strong>${voiceName}:</strong> AI odpowiada naturalnym głosem...`);
@@ -1507,7 +1538,110 @@ function playAudio(audioUrl) {
   });
 }
 
+// Jedno zapytanie TTS; używane przez tryb zdań w czacie i w Lektorze
+async function fetchTtsBlob(text, voiceId, modelId, headers, signal) {
+  const res = await fetch('/api/tts', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ text, voiceId, modelId }),
+    signal
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Błąd syntezy mowy TTS (${res.status})`);
+  }
+  const rawFallbackReason = res.headers.get('X-TTS-Fallback-Reason');
+  return {
+    blob: await res.blob(),
+    method: res.headers.get('X-TTS-Method') || '',
+    fallbackReason: rawFallbackReason ? decodeURIComponent(rawFallbackReason) : null
+  };
+}
+
+let chatSentenceSession = null;
+
+function cancelChatSentences() {
+  const session = chatSentenceSession;
+  if (!session) return;
+  chatSentenceSession = null;
+  session.cancelled = true;
+  session.queue.abort();
+  if (session.current) session.current.cancel();
+}
+
+// Tryb jednego zdania w czacie: mówimy od pierwszego gotowego zdania, kolejne generują się w tle
+async function speakChatInSentences(aiText, ttsHeaders, ttsModel, modelName) {
+  cancelChatSentences();
+  const voiceId = state.settings.voiceId;
+  const voiceName = getVoiceName(voiceId);
+  const sentences = splitTextIntoSentences(aiText);
+  const queue = new SentenceTtsQueue(
+    sentences,
+    (text, signal) => fetchTtsBlob(text, voiceId, ttsModel, ttsHeaders, signal),
+    { concurrency: sentenceConcurrency(voiceId) }
+  );
+  const session = { queue, cancelled: false, playingLast: false, current: null };
+  chatSentenceSession = session;
+
+  // Błąd pierwszego zdania obsługuje handleConversationTurn
+  await queue.get(0);
+  if (session.cancelled) return;
+
+  // Czas TTS liczymy do pierwszego zdania, bo od tej chwili odpowiedź już słychać
+  pipelineTracker.finishStep('tts');
+  const timings = {
+    stt: pipelineTracker.durations.stt,
+    llm: pipelineTracker.durations.llm,
+    tts: pipelineTracker.durations.tts,
+    total: +(pipelineTracker.durations.stt + pipelineTracker.durations.llm + pipelineTracker.durations.tts).toFixed(1)
+  };
+  const message = state.messages[addMessage('assistant', aiText, modelName, timings)];
+
+  // Sklejone nagranie całej odpowiedzi obsługuje przycisk "Odsłuchaj"
+  queue.all()
+    .then(results => mergeAudioBlobs(results.map(r => r.blob)))
+    .then(({ blob }) => {
+      if (!state.messages.includes(message)) return;
+      message.audioUrl = URL.createObjectURL(blob);
+      renderMessages();
+    })
+    .catch(err => { if (!session.cancelled) console.warn('Nie udało się skleić zdań odpowiedzi:', err); });
+
+  initAudioContext();
+  attachTtsAnalyser();
+  pipelineTracker.startStep('play');
+
+  try {
+    for (let i = 0; i < sentences.length; i++) {
+      if (!queue.isReady(i)) {
+        setStatus('speaking', `🔊 <strong>${voiceName}:</strong> Generuję zdanie ${i + 1} z ${sentences.length}...`);
+      }
+      const { blob } = await queue.get(i);
+      if (session.cancelled) return;
+
+      setStatus('speaking', `🔊 <strong>${voiceName}:</strong> Zdanie ${i + 1} z ${sentences.length}`);
+      session.playingLast = i === sentences.length - 1;
+      const url = URL.createObjectURL(blob);
+      session.current = playOnElement(ttsAudioPlayer, url);
+      try {
+        await session.current.done;
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+      if (session.cancelled) return;
+    }
+  } catch (error) {
+    if (session.cancelled) return;
+    console.error('Błąd trybu zdań w czacie:', error);
+    pipelineTracker.reset();
+    setStatus('idle', `⚠️ Błąd: ${error.message}`);
+  } finally {
+    if (chatSentenceSession === session) chatSentenceSession = null;
+  }
+}
+
 function stopAudioPlayback() {
+  cancelChatSentences();
   if (ttsAudioPlayer) {
     ttsAudioPlayer.pause();
     ttsAudioPlayer.currentTime = 0;
@@ -1770,7 +1904,7 @@ function updateReaderSystemPill() {
     readerPillVoiceName.textContent = getVoiceName(state.settings.voiceId);
   }
   if (readerPillModelName) {
-    readerPillModelName.textContent = getTtsModelName(state.settings.ttsModel);
+    readerPillModelName.textContent = getTtsModelName(state.settings.ttsModel) + (state.settings.sentenceMode ? ' • zdaniami' : '');
   }
 }
 
@@ -1833,6 +1967,12 @@ function updateReaderProgress(current, duration) {
 
 function toggleReaderPlayPause() {
   if (!readerAudioElement || !readerAudioElement.src) return;
+  // Przeczytane zdaniami bez sklejania: odtwarzacz ma tylko ostatnie zdanie, więc czytamy od początku
+  const session = readerSentenceSession;
+  if (session && session.finished && !session.merged && readerAudioElement.paused) {
+    playReaderSentences(session, 0);
+    return;
+  }
   if (readerAudioElement.paused) {
     stopAudioPlayback(); // zatrzymaj audio z czatu jeśli gra
     readerAudioElement.play().catch(e => {
@@ -1853,6 +1993,7 @@ function seekReader(secondsDelta) {
 }
 
 function stopReaderAudio() {
+  cancelReaderSentences();
   if (!readerAudioElement) return;
   readerAudioElement.pause();
   readerAudioElement.currentTime = 0;
@@ -1868,6 +2009,7 @@ async function handleReaderSynthesize() {
   }
 
   // Zatrzymaj poprzednie odtwarzanie lektora oraz audio czatu
+  cancelReaderSentences();
   if (readerAudioElement) {
     readerAudioElement.pause();
     readerAudioElement.currentTime = 0;
@@ -1905,6 +2047,11 @@ async function handleReaderSynthesize() {
     if (state.keys.google) ttsHeaders['x-google-key'] = state.keys.google;
     if (state.keys.openai) ttsHeaders['x-openai-key'] = state.keys.openai;
 
+    if (state.settings.sentenceMode) {
+      await startReaderSentences({ text, ttsHeaders, ttsModel: effectiveTtsModel, voiceName, modelName, startTime });
+      return;
+    }
+
     const res = await fetch('/api/tts', {
       method: 'POST',
       headers: ttsHeaders,
@@ -1940,6 +2087,7 @@ async function handleReaderSynthesize() {
     }
 
     if (readerDownloadLink) {
+      readerDownloadLink.hidden = false;
       readerDownloadLink.href = audioUrl;
       readerDownloadLink.download = `lektor-${Date.now()}.mp3`;
     }
@@ -2014,6 +2162,173 @@ async function handleReaderSynthesize() {
     if (readerBtnIcon) readerBtnIcon.hidden = false;
     if (readerSubmitBtnText) readerSubmitBtnText.textContent = 'Generuj nagranie lektora';
   }
+}
+
+// ==========================================
+// Lektor w trybie jednego zdania
+// ==========================================
+let readerSentenceSession = null;
+
+function readerRate() {
+  return parseFloat(readerSpeedSelect ? readerSpeedSelect.value : 1);
+}
+
+function audioExtension(blob) {
+  return blob && blob.type === 'audio/wav' ? 'wav' : 'mp3';
+}
+
+function cancelReaderSentences() {
+  const session = readerSentenceSession;
+  if (!session) return;
+  readerSentenceSession = null;
+  session.cancelled = true;
+  session.active = false;
+  session.queue.abort();
+  if (session.current) session.current.cancel();
+  session.urls.forEach(url => url && URL.revokeObjectURL(url));
+}
+
+async function startReaderSentences({ text, ttsHeaders, ttsModel, voiceName, modelName, startTime }) {
+  const voiceId = state.settings.voiceId;
+  const sentences = splitTextIntoSentences(text);
+  const queue = new SentenceTtsQueue(
+    sentences,
+    (sentence, signal) => fetchTtsBlob(sentence, voiceId, ttsModel, ttsHeaders, signal),
+    { concurrency: sentenceConcurrency(voiceId) }
+  );
+  const session = {
+    text, sentences, queue, voiceId, voiceName, modelName, startTime,
+    cancelled: false, active: false, finished: false, isLast: false,
+    index: 0, playedSec: 0, current: null, merged: null, urls: [], method: modelName
+  };
+  readerSentenceSession = session;
+
+  // Błąd pierwszego zdania obsługuje handleReaderSynthesize
+  const first = await queue.get(0);
+  if (session.cancelled) return;
+  session.method = first.method || modelName;
+  const firstSec = ((performance.now() - startTime) / 1000).toFixed(1);
+
+  if (readerPlayerEmpty) readerPlayerEmpty.hidden = true;
+  if (readerPlayerActive) readerPlayerActive.hidden = false;
+  // Plik do pobrania powstaje dopiero po sklejeniu zdań
+  if (readerDownloadLink) readerDownloadLink.hidden = true;
+  if (readerTrackTitle) {
+    const snippet = text.slice(0, 48).replace(/[\r\n]+/g, ' ');
+    readerTrackTitle.textContent = snippet.length < text.length ? `${snippet}...` : snippet;
+  }
+  if (readerTrackMeta) {
+    readerTrackMeta.textContent = `Głos: ${voiceName} • Silnik: ${session.method} • Zdaniami (${sentences.length}) • Pierwsze zdanie w ${firstSec}s`;
+  }
+  if (readerStatusText) {
+    readerStatusText.textContent = first.fallbackReason
+      ? `⚠️ Awaryjny silnik: ${first.fallbackReason}`
+      : state.settings.mergeSentences
+        ? '▶ Czytam zdanie po zdaniu. Po wygenerowaniu całości nagranie trafi do historii i będzie można je przewijać.'
+        : '▶ Czytam zdanie po zdaniu (bez sklejania, nagranie nie trafi do historii).';
+  }
+
+  if (state.settings.mergeSentences) {
+    queue.all()
+      .then(results => mergeAudioBlobs(results.map(r => r.blob)))
+      .then(merged => { if (!session.cancelled) onReaderSentencesMerged(session, merged); })
+      .catch(err => {
+        if (session.cancelled) return;
+        console.warn('Nie udało się skleić zdań:', err);
+        if (readerStatusText) readerStatusText.textContent = `⚠️ Nie udało się skleić nagrania: ${err.message}`;
+      });
+  }
+
+  playReaderSentences(session, 0);
+}
+
+async function playReaderSentences(session, from) {
+  const total = session.sentences.length;
+  session.active = true;
+  session.finished = false;
+  if (from === 0) session.playedSec = 0;
+
+  try {
+    for (let i = from; i < total; i++) {
+      session.index = i;
+      if (!session.queue.isReady(i)) {
+        if (playerStateBadge) playerStateBadge.className = 'player-live-badge busy';
+        if (playerStateText) playerStateText.textContent = `Generuję zdanie ${i + 1} z ${total}...`;
+      }
+      const { blob } = await session.queue.get(i);
+      if (session.cancelled) return;
+
+      // Gdy całość jest już sklejona, przechodzimy na nią na granicy zdań (bez przerwy)
+      if (session.merged) {
+        switchReaderToMerged(session, session.merged.offsets[i], true);
+        return;
+      }
+
+      session.urls[i] = session.urls[i] || URL.createObjectURL(blob);
+      session.isLast = i === total - 1;
+      session.current = playOnElement(readerAudioElement, session.urls[i], readerRate());
+      await session.current.done;
+      if (session.cancelled) return;
+      session.playedSec += readerAudioElement.duration || 0;
+    }
+    session.finished = true;
+  } catch (error) {
+    if (session.cancelled) return;
+    console.error('Błąd czytania zdaniami:', error);
+    if (readerStatusText) readerStatusText.textContent = `⚠️ Błąd: ${error.message}`;
+    if (playerStateBadge) playerStateBadge.className = 'player-live-badge';
+    if (playerStateText) playerStateText.textContent = 'Błąd generowania';
+  } finally {
+    session.active = false;
+  }
+}
+
+function onReaderSentencesMerged(session, { blob, offsets }) {
+  const audioUrl = URL.createObjectURL(blob);
+  session.merged = { url: audioUrl, offsets };
+  currentReaderAudioUrl = audioUrl;
+  const durationSec = `${((performance.now() - session.startTime) / 1000).toFixed(1)}s`;
+
+  if (readerDownloadLink) {
+    readerDownloadLink.hidden = false;
+    readerDownloadLink.href = audioUrl;
+    readerDownloadLink.download = `lektor-${Date.now()}.wav`;
+  }
+  if (readerStatusText) {
+    readerStatusText.textContent = `✅ Całość wygenerowana w ${durationSec}. Nagranie jest w historii, można je przewijać i pobrać.`;
+  }
+
+  const recId = `rec-${Date.now()}`;
+  addReaderHistoryItem({
+    id: recId,
+    text: session.text,
+    voiceId: session.voiceId,
+    voiceName: session.voiceName,
+    modelName: session.modelName,
+    ttsMethod: session.method,
+    isFallback: session.method.includes('Fallback'),
+    fallbackReason: null,
+    blob,
+    audioUrl,
+    durationSec,
+    createdAt: new Date(),
+    formattedTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  });
+
+  // Czytanie już się skończyło: podstawiamy sklejony plik, gotowy do ponownego odsłuchu
+  if (!session.active) switchReaderToMerged(session, 0, false);
+}
+
+function switchReaderToMerged(session, position, shouldPlay) {
+  session.active = false;
+  if (session.current) session.current.cancel();
+  readerAudioElement.src = session.merged.url;
+  readerAudioElement.defaultPlaybackRate = readerRate();
+  readerAudioElement.playbackRate = readerRate();
+  readerAudioElement.addEventListener('loadedmetadata', () => {
+    readerAudioElement.currentTime = position || 0;
+    if (shouldPlay) readerAudioElement.play().catch(e => console.warn('Odtwarzanie zablokowane:', e));
+  }, { once: true });
 }
 
 // ==========================================
@@ -2105,9 +2420,9 @@ function renderReaderHistory() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
           <span>Wczytaj tekst</span>
         </button>
-        <a href="${item.audioUrl}" download="nagranie-${item.id}.mp3" class="history-action-btn" title="Pobierz plik audio MP3">
+        <a href="${item.audioUrl}" download="nagranie-${item.id}.${audioExtension(item.blob)}" class="history-action-btn" title="Pobierz plik audio ${audioExtension(item.blob).toUpperCase()}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          <span>MP3</span>
+          <span>${audioExtension(item.blob).toUpperCase()}</span>
         </a>
         <button type="button" class="history-action-btn danger" data-action="delete" title="Usuń z historii">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -2151,6 +2466,7 @@ function renderReaderHistory() {
 }
 
 function loadHistoryItemIntoPlayer(item, shouldPlay = false) {
+  cancelReaderSentences();
   state.activeHistoryId = item.id;
   currentReaderAudioUrl = item.audioUrl;
 
@@ -2168,8 +2484,9 @@ function loadHistoryItemIntoPlayer(item, shouldPlay = false) {
   }
 
   if (readerDownloadLink) {
+    readerDownloadLink.hidden = false;
     readerDownloadLink.href = item.audioUrl;
-    readerDownloadLink.download = `nagranie-${item.id}.mp3`;
+    readerDownloadLink.download = `nagranie-${item.id}.${audioExtension(item.blob)}`;
   }
 
   if (readerTrackTitle) {
@@ -2277,6 +2594,8 @@ function setupScrubberEvents() {
 
   function seekFromEvent(e) {
     if (!readerAudioElement || !readerAudioElement.duration) return;
+    // Podczas czytania zdaniami odtwarzacz zna tylko bieżące zdanie; przewijanie działa po sklejeniu
+    if (readerSentenceSession && readerSentenceSession.active) return;
     const rect = readerScrubberTrack.getBoundingClientRect();
     const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
     const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
@@ -2325,12 +2644,22 @@ function setupReaderAudioListeners() {
   if (!readerAudioElement) return;
 
   readerAudioElement.addEventListener('loadedmetadata', () => {
+    // W trybie zdań całkowity czas liczy timeupdate
+    if (readerSentenceSession && readerSentenceSession.active) return;
     if (readerTotalTime) {
       readerTotalTime.textContent = formatReaderTime(readerAudioElement.duration);
     }
   });
 
   readerAudioElement.addEventListener('timeupdate', () => {
+    const session = readerSentenceSession;
+    if (session && session.active) {
+      // Postęp całości: przeczytane zdania + bieżące, długość reszty szacowana ze średniej
+      const current = session.playedSec + readerAudioElement.currentTime;
+      const average = (session.playedSec + (readerAudioElement.duration || 0)) / (session.index + 1);
+      updateReaderProgress(current, Math.max(current, average * session.sentences.length));
+      return;
+    }
     updateReaderProgress(readerAudioElement.currentTime, readerAudioElement.duration || 0);
   });
 
@@ -2345,6 +2674,8 @@ function setupReaderAudioListeners() {
   });
 
   readerAudioElement.addEventListener('pause', () => {
+    // Koniec zdania w trybie zdań to nie pauza, zaraz gra następne
+    if (readerSentenceSession && readerSentenceSession.active && readerAudioElement.ended) return;
     if (readerPlayIcon) readerPlayIcon.hidden = false;
     if (readerPauseIcon) readerPauseIcon.hidden = true;
     if (readerPlayPauseBtn) readerPlayPauseBtn.setAttribute('aria-label', 'Odtwórz');
@@ -2355,13 +2686,16 @@ function setupReaderAudioListeners() {
   });
 
   readerAudioElement.addEventListener('ended', () => {
+    const session = readerSentenceSession;
+    if (session && session.active && !session.isLast) return;
     if (readerPlayIcon) readerPlayIcon.hidden = false;
     if (readerPauseIcon) readerPauseIcon.hidden = true;
     if (readerPlayPauseBtn) readerPlayPauseBtn.setAttribute('aria-label', 'Odtwórz');
     if (readerWaveform) readerWaveform.classList.remove('playing');
     if (playerStateBadge) playerStateBadge.className = 'player-live-badge ready';
     if (playerStateText) playerStateText.textContent = 'Zakończono';
-    updateReaderProgress(readerAudioElement.duration || 0, readerAudioElement.duration || 0);
+    const total = (session && session.active ? session.playedSec : 0) + (readerAudioElement.duration || 0);
+    updateReaderProgress(total, total);
     updateHistoryPlayIcons(false);
   });
 }
@@ -2469,6 +2803,7 @@ function initReaderModule() {
   if (readerSpeedSelect) {
     readerSpeedSelect.addEventListener('change', () => {
       if (readerAudioElement) {
+        readerAudioElement.defaultPlaybackRate = parseFloat(readerSpeedSelect.value);
         readerAudioElement.playbackRate = parseFloat(readerSpeedSelect.value);
       }
     });

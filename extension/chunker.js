@@ -4,6 +4,8 @@
 
 const FIRST_CHUNK_MAX = 280;
 const CHUNK_MAX = 1000;
+// W trybie jednego zdania bardzo długie zdanie i tak tniemy, żeby nie czekać na nie zbyt długo
+const SENTENCE_MAX = 300;
 
 export function splitIntoChunks(text, { firstMax = FIRST_CHUNK_MAX, max = CHUNK_MAX } = {}) {
   const pieces = splitIntoSentences(text)
@@ -24,6 +26,11 @@ export function splitIntoChunks(text, { firstMax = FIRST_CHUNK_MAX, max = CHUNK_
   }
   if (current) chunks.push(current);
   return chunks;
+}
+
+// Tryb jednego zdania: każde zdanie osobno do TTS
+export function splitIntoSentenceChunks(text, max = SENTENCE_MAX) {
+  return splitIntoSentences(text).flatMap(sentence => splitLongSentence(sentence, max));
 }
 
 function splitIntoSentences(text) {

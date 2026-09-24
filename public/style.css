@@ -2509,3 +2509,11 @@ kbd {
     padding-top: 8px;
   }
 }
+
+/* Tryb jednego zdania (ustawienia TTS) */
+.sentence-options { display: grid; gap: 8px; margin-top: 12px; }
+.toggle-row { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.toggle-row strong { display: block; color: var(--ink); font-weight: 600; }
+.toggle-row input { width: 15px; height: 15px; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+.toggle-row:has(input:disabled) { opacity: .5; cursor: default; }
+.download-pill[hidden] { display: none; }

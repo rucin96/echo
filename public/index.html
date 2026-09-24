@@ -476,6 +476,16 @@
                 </select>
               </div>
             </div>
+            <div class="sentence-options">
+              <label class="toggle-row">
+                <input type="checkbox" id="sentenceModeToggle">
+                <span><strong>Tryb 1 zdania</strong> Wysyła tekst do TTS zdanie po zdaniu. Mowa startuje po pierwszym zdaniu, a kolejne generują się w tle od razu, bez czekania na przeczytanie poprzedniego (czat i Lektor).</span>
+              </label>
+              <label class="toggle-row">
+                <input type="checkbox" id="mergeSentencesToggle">
+                <span><strong>Sklej zdania w jeden plik</strong> Lektor: po wygenerowaniu całości nagranie trafia do historii, można je przewijać i pobrać (WAV).</span>
+              </label>
+            </div>
             <div class="field-hint" style="font-size:11px; color:#787b70; margin-top:8px; line-height:1.45; background:#f4f2ea; padding:8px 11px; border-radius:7px; border:1px solid #e5e3d8;">
               💡 <strong>Głos lektora</strong> określa tożsamość i barwę (np. Marek, Zofia, Sarah), a <strong>Model syntezy</strong> to silnik generujący audio (Edge Neural, Gemini TTS, WaveNet, OpenAI, ElevenLabs). Wybór głosu automatycznie dopasowuje optymalny model.
             </div>
@@ -555,4 +565,4 @@
       </div>
     </div>
 
-<audio id="ttsAudioPlayer" hidden></audio></div><script src="app.js"></script></body></html>
+<audio id="ttsAudioPlayer" hidden></audio></div><script src="sentence-tts.js"></script><script src="app.js"></script></body></html>
