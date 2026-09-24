@@ -78,7 +78,8 @@ function renderVoices(voices) {
   const groups = [
     { label: 'Google / Edge', items: voices.filter(v => v.category === 'google') },
     { label: 'OpenAI', items: voices.filter(v => v.category === 'openai') },
-    { label: 'ElevenLabs', items: voices.filter(v => v.category !== 'google' && v.category !== 'openai') }
+    { label: 'Chatterbox (lokalny)', items: voices.filter(v => v.category === 'local') },
+    { label: 'ElevenLabs', items: voices.filter(v => !['google', 'openai', 'local'].includes(v.category)) }
   ];
 
   voiceSelect.innerHTML = '';

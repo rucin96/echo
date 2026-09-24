@@ -18,14 +18,28 @@ if (!initialVoiceId || initialVoiceId === '21m00Tcm4TlvDq8ikWAM') {
 
 let initialSttModel = localStorage.getItem('stt_model') || 'gemini-3.5-transcribe';
 let initialTtsModel = localStorage.getItem('tts_model') || 'gemini-2.5-flash-preview-tts';
+// Dawny identyfikator jedynego wariantu Chatterbox
+if (initialTtsModel === 'chatterbox-multilingual') initialTtsModel = 'chatterbox-cpu';
 
 // Głosy OpenAI mają prefiks "openai-"; każdy inny identyfikator spoza Google/Edge to głos ElevenLabs
 function isOpenAIVoice(voiceId) {
   return Boolean(voiceId && voiceId.startsWith('openai-'));
 }
 
+// Głosy lokalnego serwisu Chatterbox (tts-local/) mają prefiks "local-"
+function isLocalVoice(voiceId) {
+  return Boolean(voiceId && voiceId.startsWith('local-'));
+}
+
+// Ten sam model Chatterbox liczony na CPU albo na GPU Apple (MPS)
+const LOCAL_TTS_MODEL = 'chatterbox-cpu';
+
+function isLocalTtsModel(modelId) {
+  return modelId === 'chatterbox-cpu' || modelId === 'chatterbox-mps';
+}
+
 function isElevenVoice(voiceId) {
-  return Boolean(voiceId && !voiceId.startsWith('google-') && !voiceId.startsWith('pl-PL-') && !isOpenAIVoice(voiceId));
+  return Boolean(voiceId && !voiceId.startsWith('google-') && !voiceId.startsWith('pl-PL-') && !isOpenAIVoice(voiceId) && !isLocalVoice(voiceId));
 }
 
 function isOpenAITtsModel(modelId) {
@@ -48,6 +62,7 @@ function isOpenAISttModel(modelId) {
 // Model TTS zgodny z dostawcą głosu (null = obecny model pasuje)
 function ttsModelForVoice(voiceId, ttsModel) {
   if (isOpenAIVoice(voiceId)) return isOpenAITtsModel(ttsModel) ? null : 'gpt-4o-mini-tts';
+  if (isLocalVoice(voiceId)) return isLocalTtsModel(ttsModel) ? null : LOCAL_TTS_MODEL;
   if (isElevenVoice(voiceId)) return ttsModel.startsWith('eleven_') ? null : 'eleven_multilingual_v2';
   return null;
 }
@@ -62,6 +77,9 @@ if (reconciledInitModel) {
   localStorage.setItem('voice_id', initialVoiceId);
 } else if (isOpenAITtsModel(initialTtsModel) && !isOpenAIVoice(initialVoiceId)) {
   initialVoiceId = 'openai-marin';
+  localStorage.setItem('voice_id', initialVoiceId);
+} else if (isLocalTtsModel(initialTtsModel) && !isLocalVoice(initialVoiceId)) {
+  initialVoiceId = 'local-default';
   localStorage.setItem('voice_id', initialVoiceId);
 }
 
@@ -376,6 +394,7 @@ function getVoiceName(voiceId) {
     const name = voiceId.replace('openai-', '');
     return name.charAt(0).toUpperCase() + name.slice(1);
   }
+  if (isLocalVoice(voiceId)) return 'Chatterbox';
   return defaultMap[voiceId] || 'Głos AI';
 }
 
@@ -449,7 +468,9 @@ function getTtsModelName(modelId) {
     'eleven_multilingual_v2': 'Multilingual v2',
     'gpt-4o-mini-tts': 'OpenAI GPT-4o mini TTS',
     'tts-1-hd': 'OpenAI TTS-1 HD',
-    'tts-1': 'OpenAI TTS-1'
+    'tts-1': 'OpenAI TTS-1',
+    'chatterbox-cpu': 'Chatterbox CPU',
+    'chatterbox-mps': 'Chatterbox MPS'
   };
   return map[modelId] || modelId || 'TTS';
 }
@@ -470,6 +491,10 @@ function syncVoiceAndTtsModel(source) {
     } else if (isOpenAIVoice(currentVoice)) {
       if (!isOpenAITtsModel(currentTts)) {
         ttsModelSelect.value = 'gpt-4o-mini-tts';
+      }
+    } else if (isLocalVoice(currentVoice)) {
+      if (!isLocalTtsModel(currentTts)) {
+        ttsModelSelect.value = LOCAL_TTS_MODEL;
       }
     } else if (isElevenVoice(currentVoice)) {
       if (!currentTts.startsWith('eleven_')) {
@@ -496,6 +521,10 @@ function syncVoiceAndTtsModel(source) {
     } else if (isOpenAITtsModel(currentTts)) {
       if (!isOpenAIVoice(currentVoice)) {
         voiceSelect.value = 'openai-marin';
+      }
+    } else if (isLocalTtsModel(currentTts)) {
+      if (!isLocalVoice(currentVoice)) {
+        voiceSelect.value = 'local-default';
       }
     }
   }
@@ -661,8 +690,8 @@ function updateApiStatusBadge() {
       : Boolean(state.keys.elevenLabs || state.serverConfig.hasEnvElevenLabs || hasGoogleKey);
 
   const isGoogleTts = state.settings.voiceId.startsWith('google-') || state.settings.voiceId.startsWith('pl-PL-') || state.settings.ttsModel.includes('gemini') || state.settings.ttsModel.includes('edge') || state.settings.ttsModel.includes('wavenet');
-  const hasTts = isGoogleTts
-    ? true // Edge Neural jest darmowy, a Gemini używa Google Key
+  const hasTts = (isGoogleTts || isLocalVoice(state.settings.voiceId))
+    ? true // Edge Neural i lokalny Chatterbox są darmowe, a Gemini używa Google Key
     : isOpenAIVoice(state.settings.voiceId)
       ? hasOpenAIKey
       : Boolean(state.keys.elevenLabs || state.serverConfig.hasEnvElevenLabs);
@@ -696,7 +725,8 @@ async function loadVoices() {
 
       const googleVoices = data.voices.filter(v => v.category === 'google');
       const openaiVoices = data.voices.filter(v => v.category === 'openai');
-      const elevenVoices = data.voices.filter(v => v.category !== 'google' && v.category !== 'openai');
+      const localVoices = data.voices.filter(v => v.category === 'local');
+      const elevenVoices = data.voices.filter(v => !['google', 'openai', 'local'].includes(v.category));
 
       if (googleVoices.length > 0) {
         const groupGoogle = document.createElement('optgroup');
@@ -720,6 +750,18 @@ async function loadVoices() {
           groupOpenAI.appendChild(opt);
         });
         voiceSelect.appendChild(groupOpenAI);
+      }
+
+      if (localVoices.length > 0) {
+        const groupLocal = document.createElement('optgroup');
+        groupLocal.label = 'Głosy lokalne (Chatterbox)';
+        localVoices.forEach(v => {
+          const opt = document.createElement('option');
+          opt.value = v.voice_id;
+          opt.textContent = v.name;
+          groupLocal.appendChild(opt);
+        });
+        voiceSelect.appendChild(groupLocal);
       }
 
       if (elevenVoices.length > 0) {

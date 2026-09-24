@@ -2,3 +2,10 @@ node_modules/
 .env
 .DS_Store
 *.log
+
+# Lokalny TTS (Chatterbox)
+tts-local/.venv/
+__pycache__/
+# Próbki głosów to prywatne nagrania – nie trafiają do repo
+tts-local/voices/*
+!tts-local/voices/.gitkeep

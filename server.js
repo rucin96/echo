@@ -63,8 +63,13 @@ function isOpenAIVoiceId(voiceId) {
   return Boolean(voiceId && voiceId.startsWith('openai-'));
 }
 
+// Głosy lokalnego serwisu Chatterbox (tts-local/) mają prefiks "local-"
+function isLocalVoiceId(voiceId) {
+  return Boolean(voiceId && voiceId.startsWith('local-'));
+}
+
 function isElevenVoiceId(voiceId) {
-  return Boolean(voiceId && !voiceId.startsWith('google-') && !voiceId.startsWith('pl-PL-') && !isOpenAIVoiceId(voiceId));
+  return Boolean(voiceId && !voiceId.startsWith('google-') && !voiceId.startsWith('pl-PL-') && !isOpenAIVoiceId(voiceId) && !isLocalVoiceId(voiceId));
 }
 
 function isOpenAIChatModel(modelId) {
@@ -105,6 +110,44 @@ function pcmToWavBuffer(pcmBuffer, sampleRate = 24000, numChannels = 1, bitsPerS
 }
 
 // Helper: Edge Neural TTS (Marek / Zofia - naturalny darmowy głos PL z projektu sts)
+const LOCAL_TTS_URL = (process.env.LOCAL_TTS_URL || 'http://127.0.0.1:8001').replace(/\/+$/, '');
+
+// Lista głosów z lokalnego serwisu; pusta, gdy serwis nie działa (nie blokuje reszty listy)
+async function fetchLocalVoices() {
+  try {
+    const response = await fetch(`${LOCAL_TTS_URL}/voices`, { signal: AbortSignal.timeout(1500) });
+    if (!response.ok) return [];
+    const data = await response.json();
+    return (data.voices || []).map(v => ({
+      voice_id: v.voice_id,
+      name: `${v.name} - Chatterbox (lokalny)`,
+      category: 'local'
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// Model TTS "chatterbox-mps" liczy na GPU Apple, pozostałe warianty Chatterbox na CPU
+function localTtsDevice(modelId) {
+  return modelId === 'chatterbox-mps' ? 'mps' : 'cpu';
+}
+
+async function synthesizeWithLocal(text, voiceId, device) {
+  const response = await fetch(`${LOCAL_TTS_URL}/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice: voiceId, device, language: 'pl' }),
+    // Generowanie na Macu jest wolniejsze niż w chmurze, a Lektor potrafi wysłać długi tekst
+    signal: AbortSignal.timeout(10 * 60 * 1000)
+  });
+  if (!response.ok) {
+    const details = await response.json().catch(() => ({}));
+    throw new Error(details.detail || `status ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
 async function synthesizeWithEdge(text, voice = 'pl-PL-MarekNeural') {
   const tts = new MsEdgeTTS();
   await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
@@ -494,8 +537,10 @@ const openaiVoices = [
 
 app.get('/api/voices', async (req, res) => {
   const apiKey = getElevenLabsKey(req);
+  const localVoices = await fetchLocalVoices();
+  const baseVoices = [...stsVoices, ...openaiVoices, ...localVoices];
   if (!apiKey) {
-    return res.json({ voices: [...stsVoices, ...openaiVoices, ...defaultElevenVoices] });
+    return res.json({ voices: [...baseVoices, ...defaultElevenVoices] });
   }
 
   try {
@@ -504,7 +549,7 @@ app.get('/api/voices', async (req, res) => {
     });
 
     if (!response.ok) {
-      return res.json({ voices: [...stsVoices, ...openaiVoices, ...defaultElevenVoices] });
+      return res.json({ voices: [...baseVoices, ...defaultElevenVoices] });
     }
 
     const data = await response.json();
@@ -514,9 +559,9 @@ app.get('/api/voices', async (req, res) => {
       category: v.category || 'custom'
     }));
 
-    res.json({ voices: [...stsVoices, ...openaiVoices, ...elevenVoices] });
+    res.json({ voices: [...baseVoices, ...elevenVoices] });
   } catch (error) {
-    res.json({ voices: [...stsVoices, ...openaiVoices, ...defaultElevenVoices] });
+    res.json({ voices: [...baseVoices, ...defaultElevenVoices] });
   }
 });
 
@@ -1092,7 +1137,22 @@ app.post('/api/tts', async (req, res) => {
     return res.send(audioBuffer);
   }
 
-  // 0. OpenAI TTS (gpt-4o-mini-tts, tts-1-hd, tts-1) z fallbackiem do Edge Neural
+  // 0a. Lokalny Chatterbox (tts-local/) z fallbackiem do Edge Neural
+  if (isLocalVoiceId(voiceId)) {
+    try {
+      const device = localTtsDevice(modelId);
+      const audioBuffer = await synthesizeWithLocal(cleanText, voiceId, device);
+      return finalizeAudioResponse(audioBuffer, 'audio/wav', `Chatterbox ${device.toUpperCase()} (lokalny)`);
+    } catch (err) {
+      console.warn('Lokalny Chatterbox TTS błąd:', err.message);
+      // "fetch failed" = serwis nie działa; pozostałe błędy (np. brak pamięci) przychodzą z działającego serwisu
+      ttsFallbackReason = err.message === 'fetch failed'
+        ? 'Lokalny Chatterbox nie działa. Uruchom: npm run tts-local'
+        : `Lokalny Chatterbox: ${err.message}`;
+    }
+  }
+
+  // 0b. OpenAI TTS (gpt-4o-mini-tts, tts-1-hd, tts-1) z fallbackiem do Edge Neural
   if (isOpenAIRequested) {
     const openaiKey = getOpenAIKey(req);
     if (openaiKey) {
@@ -1275,5 +1335,5 @@ app.listen(port, () => {
   console.log(`\n🚀 Serwer uruchomiony: http://localhost:${port}`);
   console.log(`🎙️  STT: Google Gemini Transcribe / Web Speech / Groq Whisper / OpenAI Transcribe / ElevenLabs Scribe`);
   console.log(`🧠 LLM: Google Gemini, Anthropic Claude & OpenAI GPT`);
-  console.log(`🔊 TTS: Google Gemini Voice / WaveNet / Edge Neural / OpenAI / ElevenLabs\n`);
+  console.log(`🔊 TTS: Google Gemini Voice / WaveNet / Edge Neural / OpenAI / ElevenLabs / Chatterbox (lokalny: ${LOCAL_TTS_URL})\n`);
 });

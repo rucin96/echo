@@ -42,6 +42,10 @@ const OPENAI_MODELS = [
   { id: 'tts-1-hd', name: 'OpenAI TTS-1 HD' },
   { id: 'tts-1', name: 'OpenAI TTS-1 (niska latencja)' }
 ];
+const LOCAL_MODELS = [
+  { id: 'chatterbox-cpu', name: 'Chatterbox CPU (lokalny)' },
+  { id: 'chatterbox-mps', name: 'Chatterbox MPS (lokalny, GPU Apple)' }
+];
 const ELEVEN_MODELS = [
   { id: 'eleven_multilingual_v2', name: 'Eleven Multilingual v2 (jakość studyjna)' },
   { id: 'eleven_flash_v2_5', name: 'Eleven Flash v2.5 (szybki)' },
@@ -53,6 +57,7 @@ export function modelsForVoice(voiceId = '') {
   if (voiceId.startsWith('pl-PL-Wavenet')) return WAVENET_MODELS;
   if (voiceId === 'pl-PL-MarekNeural' || voiceId === 'pl-PL-ZofiaNeural') return EDGE_MODELS;
   if (voiceId.startsWith('openai-')) return OPENAI_MODELS;
+  if (voiceId.startsWith('local-')) return LOCAL_MODELS;
   return ELEVEN_MODELS;
 }
 
